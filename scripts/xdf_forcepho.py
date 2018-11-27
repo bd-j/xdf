@@ -1,15 +1,15 @@
 import sys
-from functools import partial as argfix
+
 import numpy as np
 import matplotlib.pyplot as pl
 from scipy import cov
-
 from astropy.io import fits
 
 from forcepho import paths
 from forcepho.likelihood import WorkPlan, lnlike_multi
-from xdfutils import cat_to_sourcepars, prep_scene, make_xdf_stamp, Posterior, Result
 
+from xdfutils import cat_to_sourcepars, prep_scene, make_xdf_stamp, Posterior, Result
+import backends
 
 
 psfpaths = {"f814w": None,
@@ -98,95 +98,59 @@ if __name__ == "__main__":
 
     # --------------------------------
     # --- sampling ---
-    import time
 
     # --- hemcee ---
     if True:
+
+        result = backends.run_hemcee(p0, scene, plans, scales=scales, nwarm=1000, niter=500)
         
-        from hemcee import NoUTurnSampler
-        from hemcee.metric import DiagonalMetric
-        metric = DiagonalMetric(scales**2)
-        model = Posterior(scene, plans, upper=np.inf, lower=-np.inf)
-        sampler = NoUTurnSampler(model.lnprob, model.lnprob_grad, metric=metric)
-
-        t = time.time()
-        pos, lnp0 = sampler.run_warmup(p0, 2000)
-        twarm = time.time() - t
-        nwarm = np.copy(model.ncall)
-        model.ncall = 0
-        t = time.time()
-        chain, lnp = sampler.run_mcmc(pos, 1000)
-        tsample = time.time() - t
-        nsample = np.copy(model.ncall)
-        best = chain[lnp.argmax(), :]
-        label = np.concatenate([s.parameter_names for s in scene.sources])
-
-        import cPickle as pickle
-        result = Result()
-        result.ndim = len(p0)
-        result.chain = chain
-        result.lnp = lnp
-        result.ncall = nsample
-        result.wall_time = tsample
+        best = result.chain[result.lnp.argmax(), :]
+        result.labels = scene.parameter_names
         result.sourcepars = sourcepars
         result.stamps = stamps
         result.filters = filters
-        result.plans = plans
-        result.scene = scene
-        result.truths = theta_init.copy()
-        result.metric = np.copy(metric.variance)
-        result.step_size = sampler.step_size.get_step_size()
+
+        import cPickle as pickle
         if rname is not None:
             with open("{}_hemcee.pkl".format(rname), "wb") as f:
                 pickle.dump(result, f)
 
+        # --- Plotting
         fig, axes = pl.subplots(7+1, len(scene.sources), sharex=True)
-        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.plot(chain[:, i])
-        axes.flatten()[7].plot(lnp)
-        #for i, ax in enumerate(axes.T.flat): ax.axhline(p0[i], color='k', linestyle=':')
-        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.set_title(label[i])
-
-        normchain = (chain - chain.mean(axis=0)) / chain.std(axis=0)
-        corr = cov(normchain.T)
+        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.plot(result.chain[:, i])
+        axes.flatten()[7].plot(result.lnp)
+        #for i, ax in enumerate(axes.T.flat): ax.axhline(result.pinitial[i], color='k', linestyle=':')
+        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.set_title(result.labels[i])
         import corner
-        label = scene.parameter_names
-        cfig = corner.corner(chain, labels=label,
+        cfig = corner.corner(result.chain, labels=result.labels,
                              show_titles=True, fill_contours=True,
                              plot_datapoints=False, plot_density=False)
-        
+
+        normchain = (result.chain - result.chain.mean(axis=0)) / result.chain.std(axis=0)
+        corr = cov(normchain.T)
 
     # --- nested ---
     if False:
-        lnlike = argfix(lnlike_multi, scene=scene, plans=plans, grad=False)
-        theta_width = (upper - lower)
-        nlive = 50
-        
-        def prior_transform(unit_coords):
-            # now scale and shift
-            theta = lower + theta_width * unit_coords
-            return theta
 
-        import dynesty
-        
-        # "Standard" nested sampling.
-        sampler = dynesty.DynamicNestedSampler(lnlike, prior_transform, ndim, nlive=nlive,
-                                               bound="multi", method="slice", bootstrap=0)
-        t0 = time.time()
-        sampler.run_nested(nlive_init=int(nlive/2), nlive_batch=int(nlive),
-                           wt_kwargs={'pfrac': 1.0}, stop_kwargs={"post_thresh":0.2})
-        dur = time.time() - t0
-        results = sampler.results
-        results['duration'] = dur
-        indmax = results['logl'].argmax()
-        best = results['samples'][indmax, :]
+        result, dr = backends.run_dynesty(scene, plans, nlive=50, lower=lower, upper=upper)
 
+        best = result.chain[result.lnp.argmax(), :]
+        result.labels = scene.parameter_names
+        result.sourcepars = sourcepars
+        result.stamps = stamps
+        result.filters = filters
+
+        import cPickle as pickle
+        if rname is not None:
+            with open("{}_dynesty.pkl".format(rname), "wb") as f:
+                pickle.dump(result, f)
+
+        # --- Plotting
         from dynesty import plotting as dyplot
-        truths = theta_init.copy()
-        label = filters + ["ra", "dec", "q", "pa", "n", "rh"]
-        cfig, caxes = dyplot.cornerplot(results, fig=pl.subplots(ndim, ndim, figsize=(13., 10)),
-                                        labels=label, show_titles=True, title_fmt='.8f', truths=truths)
-        tfig, taxes = dyplot.traceplot(results, fig=pl.subplots(ndim, 2, figsize=(13., 13.)),
-                                    labels=label)
+        cfig, caxes = dyplot.cornerplot(dr, fig=pl.subplots(result.ndim, result.ndim, figsize=(13., 10)),
+                                        labels=result.labels, show_titles=True, title_fmt='.8f')
+        tfig, taxes = dyplot.traceplot(dr, fig=pl.subplots(result.ndim, 2, figsize=(13., 13.)),
+                                       labels=result.label)
 
         
     # ---------------------------
