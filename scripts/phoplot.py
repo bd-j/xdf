@@ -124,11 +124,11 @@ def prettify_chains(axes, labels, fontsize=10, equal_axes=False,
     return axes
 
     
-def plot_model_images(pos, scene, stamps, axes=None,
+def plot_model_images(pos, scene, stamps, axes=None, colorbars=True,
                       x=slice(None), y=slice(None)):
     vals = pos
     if axes is None:
-        rfig, raxes = pl.subplots(len(stamps), 3, figsize=(12, 3.3*len(stamps) + 0.5),
+        rfig, raxes = pl.subplots(len(stamps), 4, figsize=(14, 3.3*len(stamps) + 0.5),
                                   sharex=True, sharey=True)
     else:
         rfig, raxes = None, axes
@@ -136,16 +136,18 @@ def plot_model_images(pos, scene, stamps, axes=None,
     for i, stamp in enumerate(stamps):
         data = stamp.pixel_values
         im, grad = make_image(scene, stamp, Theta=vals)
-        raxes[i, 0].imshow(data[x, y].T, origin='lower')
-        raxes[i, 1].imshow(im[x, y].T, origin='lower')
-        resid = raxes[i, 2].imshow((data-im)[x,y].T, origin='lower')
-        if rfig is not None:
-            rfig.colorbar(resid, ax=raxes[i,:].tolist())
+        resid = data - im
+        chi = resid * stamp.ierr.reshape(stamp.nx, stamp.ny)
+        ims = [data, im, resid, chi]
+        for j, ii in enumerate(ims):
+            ci = raxes[i, j].imshow(ii[x, y].T, origin='lower')       
+            if (rfig is not None) & colorbars:
+                cb = rfig.colorbar(ci, ax=raxes[i,j], orientation='horizontal')
         text = "{}\n({}, {})".format(stamp.filtername, stamp.crval[0], stamp.crval[1])
         ax = raxes[i, 1]
         ax.text(0.6, 0.1, text, transform=ax.transAxes, fontsize=10)
 
-    labels = ['Data', 'Model', 'Data-Model']
+    labels = ['Data', 'Model', 'Data-Model', "$\chi$"]
     [ax.set_title(labels[i]) for i, ax in enumerate(raxes[0,:])]
     return rfig, raxes
 
