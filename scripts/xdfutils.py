@@ -8,7 +8,7 @@ from astropy.wcs import WCS
 from forcepho.sources import Galaxy, Scene
 from forcepho.data import PostageStamp
 from forcepho import psf as pointspread
-from forcepho.likelihood import negative_lnlike_multi
+from forcepho.likelihood import lnlike_multi
 
 __all__ = ["cat_to_sourcepars", "prep_scene",
            "make_stamp",
@@ -141,14 +141,22 @@ class Posterior(object):
         if self.verbose:
             print(Theta)
             t = time.time()
-        nll, nll_grad = negative_lnlike_multi(Theta, scene=self.scene, plans=self.plans)
+        ll, ll_grad = lnlike_multi(Theta, scene=self.scene, plans=self.plans)
+        lpr, lpr_grad = self.ln_prior_prob(Theta)
         if self.verbose:
             print(time.time() - t)
         self.ncall += 1
-        self._lnp = -nll
-        self._lnp_grad = -nll_grad
+        self._lnlike = ll
+        self._lnlike_grad = ll_grad
+        self._lnprior = lpr
+        self._lnprior_grad = lpr_grad
+        self._lnp = ll + lpr
+        self._lnp_grad = ll_grad + lpr_grad
         self._theta = Theta
 
+    def ln_prior_prob(self, theta):
+        return 0.0, np.zeros(len(theta))
+        
     def lnprob(self, Theta):
         if np.any(Theta != self._theta):
             self.evaluate(Theta)

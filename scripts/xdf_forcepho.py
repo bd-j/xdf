@@ -1,4 +1,4 @@
-import sys
+import sys, argparse
 
 import numpy as np
 import matplotlib.pyplot as pl
@@ -23,6 +23,30 @@ imnames = {"f814w": "hlsp_xdf_hst_acswfc-60mas_hudf_f814w_v1_",
 # --- Get the MMSE catalog ---
 mmse_catname = "/Users/bjohnson/Projects/xdf/data/xdf_f160-f814_3020-3470.fits"
 cat = np.array(fits.getdata(mmse_catname))
+
+
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--xlo", type=int, default=-1,
+                    help="low x pixel coordinate of MMSE cutout")
+parser.add_argument("--xhi", type=int, default=-1,
+                    help="high x pixel coordinate of MMSE cutout")
+parser.add_argument("--ylo", type=int, default=-1,
+                    help="low y pixel coordinate of MMSE cutout")
+parser.add_argument("--yhi", type=int, default=-1,
+                    help="high y pixel coordinate of MMSE cutout")
+parser.add_argument("--corners", type=int, nargs=4, default=[10, 40, 375, 405],
+                    help="corners [xlo, xhi, ylo, yhi] of MMSE cutout")
+parser.add_argument("--filters", type=list, default=["f160w"],
+                    help="names of bands to get cutouts for")
+parser.add_argument("--nwarm", type=int, default=1000,
+                    help="number of iterations for hemcee burn-in")
+parser.add_argument("--niter", type=int, default=500,
+                    help="number of iterations for hemcee production")
+parser.add_argument("--nlive", type=int, default=-1,
+                    help="number of dynesty live points")
+parser.add_argument("--results_name", type=str, default="results/results_xdf",
+                    help="root name and path for the output pickle.")
 
 
 def setup_patch(xlo, xhi, ylo, yhi, filters=["f160w"]):
@@ -53,12 +77,20 @@ if __name__ == "__main__":
     # ---------------
     # --- SETUP ---
 
-    corners = 10, 40, 375, 405
+    args = parser.parse_args()
+    filters = args.filters
+    if args.xlo <= 0:
+        corners = tuple(args.corners)
+    else:
+        corners = args.xlo, args.xhi, args.ylo, args.yhi
+
+    print(corners)
     filters = ["f160w"] #, "f814w"]
     nband = len(filters)
     sourcepars, stamps = setup_patch(*corners, filters=filters)
     cx, cy = (corners[0] + corners[1])/2, (corners[2] + corners[3]) / 2
-    rname = "results/results_xdf_x{:3.0f}_y{:3.0f}_{}".format(cx, cy, "".join(filters))
+    tail = "x{:.0f}_y{:.0f}_{}".format(cx, cy, "".join(filters))
+    rname = (args.results_name + tail)
 
     for stamp in stamps:
         #bkg = np.nanmedian(stamp.pixel_values[:5, :])  # stamp.full_header["BKG"]
@@ -75,6 +107,7 @@ if __name__ == "__main__":
     ndim = len(theta)
     nsource = len(sourcepars)
 
+    
     # --------------------------------
     # --- Show model and data ---
     if False:
@@ -100,9 +133,10 @@ if __name__ == "__main__":
     # --- sampling ---
 
     # --- hemcee ---
-    if True:
+    if args.niter > 0:
 
-        result = backends.run_hemcee(p0, scene, plans, scales=scales, nwarm=1000, niter=500)
+        result = backends.run_hemcee(p0, scene, plans, scales=scales,
+                                     nwarm=args.nwarm, niter=args.niter)
         
         best = result.chain[result.lnp.argmax(), :]
         result.labels = scene.parameter_names
@@ -130,9 +164,10 @@ if __name__ == "__main__":
         corr = cov(normchain.T)
 
     # --- nested ---
-    if False:
+    if args.nlive > 0:
 
-        result, dr = backends.run_dynesty(scene, plans, nlive=50, lower=lower, upper=upper)
+        result, dr = backends.run_dynesty(scene, plans, lower=lower, upper=upper,
+                                          nlive=args.nlive)
 
         best = result.chain[result.lnp.argmax(), :]
         result.labels = scene.parameter_names
@@ -158,5 +193,5 @@ if __name__ == "__main__":
     if True:
         # plot the data and model
         from phoplot import plot_model_images
-        rfig, raxes = plot_model_images(best, scene, stamps)
+        rfig, raxes = plot_model_images(best, result.scene, result.stamps)
         pl.show()

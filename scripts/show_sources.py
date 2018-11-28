@@ -69,5 +69,8 @@ if __name__ == "__main__":
     hst_idx = (hst_original.min(axis=0) > 0) & (hst_original.max(axis=0) < 500)
     ax.plot(*hst_original[:, hst_idx], marker='o', linestyle='')
 
-    hh = (hst_original[0] > 10) & (hst_original[0] < 40) & (hst_original[1] > 375) & (hst_original[1] < 405)
-    
+    xlo, xhi, ylo, yhi = 148, 160, 180, 210
+    hh = (hst_original[0] > xlo) & (hst_original[0] < xhi) & (hst_original[1] > ylo) & (hst_original[1] < yhi)
+    print(threeDHST_Cat[hh])
+
+    pl.show()
