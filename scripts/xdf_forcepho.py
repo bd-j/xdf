@@ -13,7 +13,7 @@ import backends
 
 
 psfpaths = {"f814w": None,
-            "f160w": "gmpsf_hst_f160w_ng3.h5"
+            "f160w": "../data/psfs/mixtures/gmpsf_hst_f160w_ng3.h5"
             }
 imnames = {"f814w": "hlsp_xdf_hst_acswfc-60mas_hudf_f814w_v1_",
            "f160w": "hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_"
@@ -21,7 +21,7 @@ imnames = {"f814w": "hlsp_xdf_hst_acswfc-60mas_hudf_f814w_v1_",
     
 # ------------------------------------
 # --- Get the MMSE catalog ---
-mmse_catname = "/Users/bjohnson/Projects/xdf/data/xdf_f160-f814_3020-3470.fits"
+mmse_catname = "/Users/bjohnson/Projects/xdf/data/catalogs/xdf_f160-f814_3020-3470.fits"
 cat = np.array(fits.getdata(mmse_catname))
 
 
