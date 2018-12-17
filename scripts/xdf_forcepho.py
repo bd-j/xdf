@@ -6,7 +6,7 @@ from scipy import cov
 from astropy.io import fits
 
 from forcepho import paths
-from forcepho.likelihood import WorkPlan, lnlike_multi
+from forcepho.likelihood import WorkPlan
 
 from xdfutils import cat_to_sourcepars, prep_scene, make_xdf_stamp, Posterior, Result
 import backends
@@ -45,6 +45,8 @@ parser.add_argument("--niter", type=int, default=500,
                     help="number of iterations for hemcee production")
 parser.add_argument("--nlive", type=int, default=-1,
                     help="number of dynesty live points")
+parser.add_argument("--backend", type=str, default="hemcee",
+                    help="Sampling backend to use")
 parser.add_argument("--results_name", type=str, default="results/results_xdf",
                     help="root name and path for the output pickle.")
 
@@ -90,7 +92,7 @@ if __name__ == "__main__":
     sourcepars, stamps = setup_patch(*corners, filters=filters)
     cx, cy = (corners[0] + corners[1])/2, (corners[2] + corners[3]) / 2
     tail = "x{:.0f}_y{:.0f}_{}".format(cx, cy, "".join(filters))
-    rname = (args.results_name + tail)
+    rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
 
     for stamp in stamps:
         #bkg = np.nanmedian(stamp.pixel_values[:5, :])  # stamp.full_header["BKG"]
@@ -120,9 +122,9 @@ if __name__ == "__main__":
     plate_scale = np.linalg.eigvals(np.linalg.inv(stamps[0].dpix_dsky))
     plate_scale = np.abs(plate_scale).mean()
 
-    upper = [[15.0, s[1] + 1 * plate_scale, s[2] + 1 * plate_scale, 1.0, np.pi/2, 5.0, 0.3]
-             for s in sourcepars]
     lower = [[0.0, s[1] - 1 * plate_scale, s[2] - 1 * plate_scale, 0.3, -np.pi/2, 1.2, 0.015]
+             for s in sourcepars]
+    upper = [[15.0, s[1] + 1 * plate_scale, s[2] + 1 * plate_scale, 1.0, np.pi/2, 5.0, 0.3]
              for s in sourcepars]
     upper = np.concatenate(upper)
     lower = np.concatenate(lower)
@@ -131,9 +133,42 @@ if __name__ == "__main__":
 
     # --------------------------------
     # --- sampling ---
+    
+    # --- pymc3 ---
+    if args.backend == "pymc3":
+        result = backends.run_pymc3(p0, scene, plans,
+                                    lower=lower, upper=upper,
+                                    nwarm=args.nwarm, niter=args.niter)
+        result.labels = scene.parameter_names
+        result.sourcepars = sourcepars
+        result.stamps = stamps
+        result.filters = filters
+        result.corners = corners
+        best = result.chain[-1, :]
 
+        import cPickle as pickle
+        if rname is not None:
+            with open("{}.pkl".format(rname), "wb") as f:
+                pickle.dump(result, f)
+
+        # --- Plotting
+        fig, axes = pl.subplots(7+1, len(scene.sources), sharex=True)
+        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.plot(result.chain[:, i])
+        axes.flatten()[7].plot(result.lnp)
+        #for i, ax in enumerate(axes.T.flat): ax.axhline(result.pinitial[i], color='k', linestyle=':')
+        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.set_title(result.labels[i])
+        import corner
+        cfig = corner.corner(result.chain, labels=result.labels,
+                             show_titles=True, fill_contours=True,
+                             plot_datapoints=False, plot_density=False)
+
+        normchain = (result.chain - result.chain.mean(axis=0)) / result.chain.std(axis=0)
+        corr = cov(normchain.T)
+
+
+        
     # --- hemcee ---
-    if args.niter > 0:
+    if args.backend == "hemcee":
 
         result = backends.run_hemcee(p0, scene, plans, scales=scales,
                                      nwarm=args.nwarm, niter=args.niter)
@@ -143,10 +178,11 @@ if __name__ == "__main__":
         result.sourcepars = sourcepars
         result.stamps = stamps
         result.filters = filters
+        result.corners = corners
 
         import cPickle as pickle
         if rname is not None:
-            with open("{}_hemcee.pkl".format(rname), "wb") as f:
+            with open("{}.pkl".format(rname), "wb") as f:
                 pickle.dump(result, f)
 
         # --- Plotting
@@ -164,7 +200,7 @@ if __name__ == "__main__":
         corr = cov(normchain.T)
 
     # --- nested ---
-    if args.nlive > 0:
+    if args.backend == "dynesty":
 
         result, dr = backends.run_dynesty(scene, plans, lower=lower, upper=upper,
                                           nlive=args.nlive)
@@ -177,7 +213,7 @@ if __name__ == "__main__":
 
         import cPickle as pickle
         if rname is not None:
-            with open("{}_dynesty.pkl".format(rname), "wb") as f:
+            with open("{}.pkl".format(rname), "wb") as f:
                 pickle.dump(result, f)
 
         # --- Plotting
@@ -187,6 +223,8 @@ if __name__ == "__main__":
         tfig, taxes = dyplot.traceplot(dr, fig=pl.subplots(result.ndim, 2, figsize=(13., 13.)),
                                        labels=result.label)
 
+    if args.backend == "none":
+        sys.exit()
         
     # ---------------------------
     # --- Plot results ---

@@ -4,7 +4,7 @@ import numpy as np
 import matplotlib.pyplot as pl
 
 from forcepho.likelihood import WorkPlan, lnlike_multi
-from xdfutils import Posterior, Result
+from xdfutils import Posterior, Result, LogLikeWithGrad
 
 
 __all__ = ["run_hemcee", "run_dynesty", "run_hmc"]
@@ -26,6 +26,41 @@ def priors(stamps, sourcepars):
     scales = np.concatenate([f + [plate_scale, plate_scale, 0.1, 0.1, 0.1, 0.01] for f in fluxes])
 
     return scales, lower, upper
+
+
+def run_pymc3(p0, scene, plans, lower=-np.inf, upper=np.inf,
+              nwarm=2000, niter=1000):
+
+    import pymc3 as pm
+    import theano.tensor as tt
+
+    model = Posterior(scene, plans)
+    logl = LogLikeWithGrad(model)
+    pnames = scene.parameter_names
+    t = time.time()
+    with pm.Model() as opmodel:
+        z0 = [pm.Uniform(p, lower=l, upper=u)
+              for p, l, u in zip(pnames, lower, upper)]
+        theta = tt.as_tensor_variable(z0)
+        pm.DensityDist('likelihood', lambda v: logl(v), observed={'v': theta})
+        trace = pm.sample(niter, tune=nwarm, cores=1, discard_tuned_samples=True)
+
+    tsample = time.time() - t
+    
+    result = Result()
+    result.ndim = len(p0)
+    result.pinitial = p0.copy()
+    result.chain = np.array([trace.get_values(n) for n in pnames]).T
+    result.trace = trace
+    #result.lnp = sampler.lnp.copy()
+    result.ncall = model.ncall
+    result.wall_time = tsample
+    result.plans = plans
+    result.scene = scene
+    result.lower = lower
+    result.upper = upper
+
+    return result
 
 
 def run_hemcee(p0, scene, plans, scales=1.0, nwarm=2000, niter=1000):

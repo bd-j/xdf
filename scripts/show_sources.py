@@ -42,10 +42,10 @@ if __name__ == "__main__":
     im, wght, rms, cutout, wcs = get_cutout(base, band, mmse_position, mmse_size)
     hdr = fits.getheader(base + band + "sci.fits")
 
-    catname = "/Users/bjohnson/Projects/xdf/data/xdf_f160-f814_3020-3470.fits"
+    catname = "/Users/bjohnson/Projects/xdf/data/catalogs/xdf_f160-f814_3020-3470.fits"
     mmse = np.array(fits.getdata(catname))
 
-    threeDHST_Cat = np.genfromtxt(os.path.join(base, '../3DHST_combined_catalog.dat'), names=True)
+    threeDHST_Cat = np.genfromtxt(os.path.join(base, '../../catalogs/3DHST_combined_catalog.dat'), names=True)
     hst = SkyCoord(ra=threeDHST_Cat['ra'], dec=threeDHST_Cat['dec'], unit=(u.deg, u.deg))
     # origin: coordinate in the upper left corner of the image, for Numpy should be 0
     xp, yp = hst.to_pixel(wcs, origin=0)
@@ -69,7 +69,8 @@ if __name__ == "__main__":
     hst_idx = (hst_original.min(axis=0) > 0) & (hst_original.max(axis=0) < 500)
     ax.plot(*hst_original[:, hst_idx], marker='o', linestyle='')
 
-    xlo, xhi, ylo, yhi = 148, 160, 180, 210
+    xlo, xhi, ylo, yhi = 440, 480, 235, 270#148, 160, 180, 210
+
     hh = (hst_original[0] > xlo) & (hst_original[0] < xhi) & (hst_original[1] > ylo) & (hst_original[1] < yhi)
     print(threeDHST_Cat[hh])
 

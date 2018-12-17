@@ -10,9 +10,15 @@ from forcepho.data import PostageStamp
 from forcepho import psf as pointspread
 from forcepho.likelihood import lnlike_multi
 
+try:
+    import theano.tensor as tt
+except:
+    pass
+
+
 __all__ = ["cat_to_sourcepars", "prep_scene",
-           "make_stamp",
-           "Posterior", "Result"] 
+           "get_cutout", "make_xdf_stamp",
+           "Posterior", "LogLikeWithGrad", "Result"] 
 
 base = "/Users/bjohnson/Projects/xdf/data/images/"
 
@@ -127,54 +133,75 @@ def cat_to_sourcepars(catrow):
 
 class Posterior(object):
 
-    def __init__(self, scene, plans, upper=np.inf, lower=-np.inf, verbose=False):
+    def __init__(self, scene, plans, lnlike=lnlike_multi, lnprior=None,
+                 transform=None, upper=np.inf, lower=-np.inf, verbose=False):
         self.scene = scene
         self.plans = plans
+        self.lnlike = lnlike
+        if lnprior is not None:
+            self.lnprior = lnprior
+        self.T = transform
+        self.ncall = 0
         self._theta = -99
+        self._z = -99
         self.lower = lower
         self.upper = upper
-        self.verbose = verbose
-        self.ncall = 0
 
-    def evaluate(self, theta):
-        Theta = self.complete_theta(theta)
-        if self.verbose:
-            print(Theta)
-            t = time.time()
-        ll, ll_grad = lnlike_multi(Theta, scene=self.scene, plans=self.plans)
-        lpr, lpr_grad = self.ln_prior_prob(Theta)
-        if self.verbose:
-            print(time.time() - t)
+    def evaluate(self, z):
+        """
+        :param z:
+            The untransformed (sampling) parameters which have a prior
+            distribution attached.
+
+        Theta are the transformed forcepho native parameters.  In the default
+        case these are these are the same as thetaprime, i.e. the
+        transformation is the identity.
+        """
+        Theta = self.transform(z)
+        ll, ll_grad = self.lnlike(Theta, scene=self.scene, plans=self.plans)
+        lpr, lpr_grad = self.lnprior(Theta)
+       
         self.ncall += 1
         self._lnlike = ll
         self._lnlike_grad = ll_grad
         self._lnprior = lpr
         self._lnprior_grad = lpr_grad
-        self._lnp = ll + lpr
-        self._lnp_grad = ll_grad + lpr_grad
-        self._theta = Theta
 
-    def ln_prior_prob(self, theta):
-        return 0.0, np.zeros(len(theta))
+        self._lnp = ll + lpr + self._lndetjac
+        self._lnp_grad = (ll_grad + lpr_grad) * self._jacobian + self._lndetjac_grad
+        self._theta = Theta
+        self._z = z
+
+    def lnprior(self, Theta):
+        return 0.0, 0.0
         
-    def lnprob(self, Theta):
-        if np.any(Theta != self._theta):
-            self.evaluate(Theta)
+    def lnprob(self, z):
+        if np.any(z != self._z):
+            self.evaluate(z)
         return self._lnp
 
-    def lnprob_grad(self, Theta):
-        if np.any(Theta != self._theta):
-            self.evaluate(Theta)
+    def lnprob_grad(self, z):
+        if np.any(z != self._z):
+            self.evaluate(z)
         return self._lnp_grad
 
-    def complete_theta(self, theta):
-        return theta
+    def transform(self, z):
+        if self.T is not None:
+            self._jacobian = self.T.jacobian(z)
+            self._lndetjac = self.T.lndetjac(z)
+            self._lndetjac_grad = self.T.lndetjac_grad(z)
+            return self.T.transform(z)
+        else:
+            self._jacobian = 1.
+            self._lndetjac = 0
+            self._lndetjac_grad = 0
+            return np.array(z)
 
     def check_constrained(self, theta):
         """Method that checks parameter values against constraints.  If they
         are above or below the boundaries, the sign of the momentum is flipped
         and theta is adjusted as if the trajectory had bounced off the
-        constraint.
+        constraint.  This is only useful for bd-j/hmc backends.
 
         :param theta:
             The parameter vector
@@ -188,7 +215,6 @@ class Posterior(object):
         :returns flag:
             A flag for if the values are still out of bounds.
         """
-
         #initially no flips
         sign = np.ones_like(theta)
         oob = True #pretend we started out-of-bounds to force at least one check
@@ -204,6 +230,45 @@ class Posterior(object):
             #print('theta_out ={0}'.format(theta))
         return theta, sign, oob
 
+
+class ModelGradOp(tt.Op):
+    """Wraps the Posterior object lnprob_grad() method in a theano tensor
+    operation
+    """
+
+    itypes = [tt.dvector]
+    otypes = [tt.dvector]
+
+    def __init__(self, model):
+        self.model = model
+
+    def perform(self, node, inputs, outputs):
+        z, = inputs
+        ll_grads = self.model.lnprob_grad(z)
+        outputs[0][0] = ll_grads
+
+
+class LogLikeWithGrad(tt.Op):
+    """Wraps the Posterior object lnprob() and lnprob_grad() methods in theano
+    tensor operations
+    """
+    
+    itypes = [tt.dvector]
+    otypes = [tt.dscalar]
+
+    def __init__(self, model):
+        self.model = model
+        self.GradObj = ModelGradOp(self.model)
+
+    def perform(self, node, inputs, outputs):
+        z, = inputs
+        logl = self.model.lnprob(z)
+        outputs[0][0] = np.array(logl)
+
+    def grad(self, inputs, g):
+        z, = inputs
+        return [g[0] * self.GradObj(z)]
+    
 
 class Result(object):
 
