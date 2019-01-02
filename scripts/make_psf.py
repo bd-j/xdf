@@ -13,14 +13,14 @@ Comments:
 """
 
 # import modules
-
+import argparse, os
 import numpy as np
 import astropy.io.fits as fits
 from astropy.wcs import WCS
 from astropy import units as u
 from astropy.coordinates import SkyCoord
 from astropy.nddata import Cutout2D
-import matplotlib.pyplot as plt
+import matplotlib.pyplot as pl
 from scipy import ndimage
 from astropy.modeling import models, fitting
 
@@ -33,7 +33,7 @@ Vizier.ROW_LIMIT = -1
 
 def prepare_image(path_image, show_img=False):
     '''
-    Loads image, determines center, readius and WCS of image.
+    Loads image, determines center, radius and WCS of image.
     '''
     img_fits = fits.open(path_image)
     # determine center of image
@@ -45,13 +45,13 @@ def prepare_image(path_image, show_img=False):
     # show image
     if show_img:
         # plot image
-        fig = plt.figure()
+        fig = pl.figure()
         fig.add_subplot(111, projection=wcs_img)
-        plt.imshow(img_fits[0].data, origin='lower', cmap=plt.cm.viridis, vmin=0.0, vmax=0.05)
-        plt.plot(int(0.5*img_fits[0].header['NAXIS1']), int(0.5*img_fits[0].header['NAXIS2']), '+', color='red')
-        plt.xlabel('RA')
-        plt.ylabel('Dec')
-        plt.show()
+        pl.imshow(img_fits[0].data, origin='lower', cmap=pl.cm.viridis, vmin=0.0, vmax=0.05)
+        pl.plot(int(0.5*img_fits[0].header['NAXIS1']), int(0.5*img_fits[0].header['NAXIS2']), '+', color='red')
+        pl.xlabel('RA')
+        pl.ylabel('Dec')
+        pl.show()
     return(img_fits[0].data, coord_center, radius_arcsec, wcs_img)
 
 
@@ -66,7 +66,7 @@ def get_gaia_star(coord_center, radius_arcsec, g_mag_cut=15.0):
     gaia_stars = Gaia.query_object_async(coordinate=coord, radius=radius)
     # choose stars with proper motion and mag cut
     prop_motion = np.sqrt(gaia_stars['pmra'].data.data**2+gaia_stars['pmdec'].data.data**2)
-    idx_good_stars = (gaia_stars['astrometric_excess_noise'].data.data < 1.0) & (prop_motion < 20.0).data & (gaia_stars['phot_g_mean_mag'].data.data > 15.0)
+    idx_good_stars = (gaia_stars['astrometric_excess_noise'].data.data < 1.0) & (prop_motion < 20.0).data & (gaia_stars['phot_g_mean_mag'].data.data > g_mag_cut)
     print('number of stars found in GAIA :', np.sum(idx_good_stars))
     coord_gaia = SkyCoord(ra=gaia_stars[idx_good_stars]['ra'], dec=gaia_stars[idx_good_stars]['dec'], unit=(u.deg, u.deg))
     return(coord_gaia)
@@ -86,9 +86,9 @@ def make_cutout(image, WCS_img, position, size=100.0, size_in_arcsec=False, show
         size = (size*u.pixel, size*u.pixel)
         cutout = Cutout2D(image, WCS_img.wcs_world2pix([[position.ra.deg, position.dec.deg]], 1)[0], size)
     if show_img:
-        img = plt.imshow(cutout.data, origin='lower')
-        plt.axis('off')
-        plt.show()
+        img = pl.imshow(cutout.data, origin='lower')
+        pl.axis('off')
+        pl.show()
     return(cutout)
 
 
@@ -107,7 +107,7 @@ def fit_star(psf_data, type_fit):
     return(p)
 
 
-def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, g_mag_cut=15.0, verbose=False):
+def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, g_mag_cut=15.0, return_stamps=False, verbose=False):
     '''
     Determines PSF from image from GAIA stars.
     '''
@@ -124,6 +124,7 @@ def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, g_mag_cut=15.0, 
         dx, dy = 0.5*star_cutout.data.shape[0]-star_fit.parameters[1], 0.5*star_cutout.data.shape[1]-star_fit.parameters[2]
         if verbose:
             print('shift dx, dy = ', dx, dy)
+            print('min, max = ', star_cutout.data.min(), star_cutout.data.max())
         # shift PSF
         star_cutout_shifted = ndimage.interpolation.shift(star_cutout.data, [dx, dy], order=3)
         star_cutout_shifted_norm = star_cutout_shifted/np.nansum(star_cutout_shifted)
@@ -136,35 +137,57 @@ def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, g_mag_cut=15.0, 
     # save and return PSF
     hdu = fits.PrimaryHDU(data=PSF_final)
     hdu.writeto(path_psf, overwrite=True)
-    return(PSF_final)
+    if return_stamps:
+        return PSF_final, psf_mat[:, edge_cut:-edge_cut, edge_cut:-edge_cut]
+
+    return PSF_final
 
 
-# run example:
-psf_base = "/Users/sandrotacchella/ASTRO/JWST/xdf/data/psfs/"
 
-path_image = 'https://archive.stsci.edu/pub/hlsp/xdf/hlsp_xdf_hst_acswfc-60mas_hudf_f814w_v1_sci.fits'
-path_PSF = psf_base + 'PSF_f814w.fits'
-PSF = get_PSF(path_image, path_PSF, 100.0, factor_enlarge=1.2, g_mag_cut=15.0, verbose=False)
-plt.imshow(np.log10(PSF))
-plt.show()
+parser = argparse.ArgumentParser()
+parser.add_argument("--psf_base", type=str,
+                    default="../data/psfs/",
+                    help="location for the output PSF")
+parser.add_argument("--path_image", type=str,
+                    default="https://archive.stsci.edu/pub/hlsp/xdf/hlsp_xdf_hst_acswfc-30mas_hudf_f814w_v1_sci.fits",
+                    help="Full path to the image from which to generate PSF.  Must have valid WCS")
+parser.add_argument("--psf_name", type=str,
+                    default='PSF_30mas_f814w.fits',
+                    help="name of the PSF file")
+parser.add_argument("--save_pdf", type=bool,
+                    default=False,
+                    help="whether to save a PDF of the PSF")
+parser.add_argument("--verbose", type=bool,
+                    default=False,
+                    help="Say stuff?")
+#parser.add_argument("--band", type=str, default="f814w",
+#                    help="name of the PSF file")
+#parser.add_argument("--plate_scale", type=str, default='30',
+#                    help="plate scale in mas")
 
-path_image = 'https://archive.stsci.edu/pub/hlsp/xdf/hlsp_xdf_hst_wfc3ir-60mas_hudf_f125w_v1_sci.fits'
-path_PSF = psf_base + 'PSF_f125w.fits'
-PSF = get_PSF(path_image, path_PSF, 100.0, factor_enlarge=1.2, g_mag_cut=15.0, verbose=False)
-plt.imshow(np.log10(PSF))
-plt.show()
 
-path_image = 'https://archive.stsci.edu/pub/hlsp/xdf/hlsp_xdf_hst_wfc3ir-60mas_hudf_f140w_v1_sci.fits'
-path_PSF = psf_base + 'PSF_f140w.fits'
-PSF = get_PSF(path_image, path_PSF, 100.0, factor_enlarge=1.2, g_mag_cut=15.0, verbose=False)
-plt.imshow(np.log10(PSF))
-plt.show()
+if __name__ == "__main__":
+    
+    args = parser.parse_args()
 
-path_image = 'https://archive.stsci.edu/pub/hlsp/xdf/hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_sci.fits'
-path_PSF = psf_base + 'PSF_f160w.fits'
-PSF = get_PSF(path_image, path_PSF, 100.0, factor_enlarge=1.2, g_mag_cut=15.0, verbose=False)
-plt.imshow(np.log10(PSF))
-plt.show()
+    path_PSF = os.path.join(args.psf_base, args.psf_name)
+    PSF = get_PSF(args.path_image, path_PSF, 100.0, factor_enlarge=1.2, g_mag_cut=15.0, verbose=args.verbose)
+
+    pfig, pax = pl.subplots()
+    pax.imshow(np.log10(PSF))
+
+    star_fit = fit_star(PSF, type_fit="Moffat")
+    x, y = np.meshgrid(np.arange(PSF.shape[0]), np.arange(PSF.shape[1]))
+    r = np.hypot(x - star_fit.parameters[1], y-star_fit.parameters[2])
+    model = np.zeros_like(PSF)
+    _ = star_fit.render(model)
+
+    rfig, rax = pl.subplots()
+    rax.plot(r.flat, PSF.flat, '.', label="PSF")
+    rax.plot(r.flat, model.flat, '.', label="Moffat fit")
+    rax.legend()
+
+    pl.show()
 
 
 
