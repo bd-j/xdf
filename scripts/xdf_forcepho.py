@@ -10,6 +10,7 @@ from forcepho.likelihood import WorkPlan
 
 from xdfutils import cat_to_sourcepars, prep_scene, make_xdf_stamp, Posterior, Result
 import backends
+from phoplot import plot_model_images, display
 
 
 psfpaths = {"f814w": None,
@@ -79,20 +80,28 @@ if __name__ == "__main__":
     # ---------------
     # --- SETUP ---
 
+    # ---------------------
+    # --- variables and file names ---
     args = parser.parse_args()
     filters = args.filters
+    filters = ["f160w"] #, "f814w"]
+    nband = len(filters)
+
     if args.xlo <= 0:
         corners = tuple(args.corners)
     else:
         corners = args.xlo, args.xhi, args.ylo, args.yhi
-
     print(corners)
-    filters = ["f160w"] #, "f814w"]
-    nband = len(filters)
-    sourcepars, stamps = setup_patch(*corners, filters=filters)
     cx, cy = (corners[0] + corners[1])/2, (corners[2] + corners[3]) / 2
     tail = "x{:.0f}_y{:.0f}_{}".format(cx, cy, "".join(filters))
-    rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
+    if args.results_name.lower() != "none":
+        rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
+    else:
+        rname = None
+
+    # ---------------------
+    # --- Scene & Stamps ---
+    sourcepars, stamps = setup_patch(*corners, filters=filters)
 
     for stamp in stamps:
         #bkg = np.nanmedian(stamp.pixel_values[:5, :])  # stamp.full_header["BKG"]
@@ -109,11 +118,9 @@ if __name__ == "__main__":
     ndim = len(theta)
     nsource = len(sourcepars)
 
-    
     # --------------------------------
-    # --- Show model and data ---
+    # --- Show initial model and data ---
     if False:
-        from phoplot import plot_model_images
         fig, axes = plot_model_images(p0, scene, stamps)
         pl.show()
      
@@ -121,24 +128,33 @@ if __name__ == "__main__":
     # --- Priors and scale guesses ---
     plate_scale = np.linalg.eigvals(np.linalg.inv(stamps[0].dpix_dsky))
     plate_scale = np.abs(plate_scale).mean()
+    npix = 0.5
+    rh_range = np.array(scene.sources[0].rh_range)
+    sersic_range = np.array(scene.sources[0].sersic_range)
+    npar = scene.sources[0].nparam
+    flux_ranges = np.array([[0, s[0][0] * 10] for s in sourcepars])
 
-    lower = [[0.0, s[1] - 1 * plate_scale, s[2] - 1 * plate_scale, 0.3, -np.pi/2, 1.2, 0.015]
-             for s in sourcepars]
-    upper = [[15.0, s[1] + 1 * plate_scale, s[2] + 1 * plate_scale, 1.0, np.pi/2, 5.0, 0.3]
-             for s in sourcepars]
+    lower = [[fr[0], s[1] - npix * plate_scale, s[2] - npix * plate_scale,
+              0.3, -np.pi/2, sersic_range[0], rh_range[0]]
+             for s, fr in zip(sourcepars, flux_ranges)]
+    upper = [[fr[1], s[1] + npix * plate_scale, s[2] + npix * plate_scale,
+              1.0, np.pi/2, sersic_range[-1], rh_range[-1]]
+             for s, fr in zip(sourcepars, flux_ranges)]
     upper = np.concatenate(upper)
     lower = np.concatenate(lower)
     fluxes = [s[0] for s in sourcepars]
-    scales = np.concatenate([f + [plate_scale, plate_scale, 0.1, 0.1, 0.1, 0.01] for f in fluxes])
+    scales = np.concatenate([f + [plate_scale, plate_scale, 0.1, 0.1, 0.1, 0.01]
+                             for f in fluxes])
 
     # --------------------------------
     # --- sampling ---
     
     # --- pymc3 ---
     if args.backend == "pymc3":
-        result = backends.run_pymc3(p0, scene, plans,
-                                    lower=lower, upper=upper,
+
+        result = backends.run_pymc3(p0, scene, plans, lower=lower, upper=upper,
                                     nwarm=args.nwarm, niter=args.niter)
+
         result.labels = scene.parameter_names
         result.sourcepars = sourcepars
         result.stamps = stamps
@@ -148,25 +164,17 @@ if __name__ == "__main__":
 
         import cPickle as pickle
         if rname is not None:
+            trace = result.trace
+            result.trace = None
             with open("{}.pkl".format(rname), "wb") as f:
                 pickle.dump(result, f)
-
+            result.trace = trace
+                
         # --- Plotting
-        fig, axes = pl.subplots(7+1, len(scene.sources), sharex=True)
-        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.plot(result.chain[:, i])
-        axes.flatten()[7].plot(result.lnp)
-        #for i, ax in enumerate(axes.T.flat): ax.axhline(result.pinitial[i], color='k', linestyle=':')
-        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.set_title(result.labels[i])
-        import corner
-        cfig = corner.corner(result.chain, labels=result.labels,
-                             show_titles=True, fill_contours=True,
-                             plot_datapoints=False, plot_density=False)
-
+        _ = display(result, save=False, show=True)
         normchain = (result.chain - result.chain.mean(axis=0)) / result.chain.std(axis=0)
         corr = cov(normchain.T)
 
-
-        
     # --- hemcee ---
     if args.backend == "hemcee":
 
@@ -186,16 +194,7 @@ if __name__ == "__main__":
                 pickle.dump(result, f)
 
         # --- Plotting
-        fig, axes = pl.subplots(7+1, len(scene.sources), sharex=True)
-        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.plot(result.chain[:, i])
-        axes.flatten()[7].plot(result.lnp)
-        #for i, ax in enumerate(axes.T.flat): ax.axhline(result.pinitial[i], color='k', linestyle=':')
-        for i, ax in enumerate(axes[:-1, ...].T.flat): ax.set_title(result.labels[i])
-        import corner
-        cfig = corner.corner(result.chain, labels=result.labels,
-                             show_titles=True, fill_contours=True,
-                             plot_datapoints=False, plot_density=False)
-
+        _ = display(result, save=False, show=True)
         normchain = (result.chain - result.chain.mean(axis=0)) / result.chain.std(axis=0)
         corr = cov(normchain.T)
 
@@ -222,14 +221,8 @@ if __name__ == "__main__":
                                         labels=result.labels, show_titles=True, title_fmt='.8f')
         tfig, taxes = dyplot.traceplot(dr, fig=pl.subplots(result.ndim, 2, figsize=(13., 13.)),
                                        labels=result.label)
+        rfig, raxes = plot_model_images(best, result.scene, result.stamps)
 
+    # --- No fitting ---
     if args.backend == "none":
         sys.exit()
-        
-    # ---------------------------
-    # --- Plot results ---
-    if True:
-        # plot the data and model
-        from phoplot import plot_model_images
-        rfig, raxes = plot_model_images(best, result.scene, result.stamps)
-        pl.show()

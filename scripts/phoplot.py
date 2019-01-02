@@ -1,12 +1,67 @@
-import os
+import os, sys, glob
 import numpy as np
 import matplotlib.pyplot as pl
 from matplotlib import gridspec
 from matplotlib.backends.backend_pdf import PdfPages
-import pickle, sys
+import cPickle as pickle
 
-#from demo_semi import setup_scene, Posterior
 from forcepho.likelihood import make_image
+
+def display(data, save=True, show=False, root="xdf"):
+
+    if type(data) is str:
+        fn = data
+        root = os.path.join("figures", fn.split("results_")[-1].replace('.pkl', ''))
+        with open(fn, "r") as f:
+            try:
+                result = pickle.load(f)
+            except(ImportError):
+                print("couldn't import {}".format(fn))
+                return
+    else:
+        result = data
+
+    # --- Chains ---
+    fig, axes = pl.subplots(7+1, len(result.scene.sources), sharex=True, figsize=(13, 12))
+    for i, ax in enumerate(axes[:-1, ...].T.flat):
+        ax.plot(result.chain[:, i])
+        ax.set_ylabel(result.scene.parameter_names[i])
+    try:
+        [ax.plot(result.lnp) for ax in axes[-1, ...].flat]
+        [ax.set_xlabel("iteration") for ax in axes[-1, ...].flat]
+        axes[-1, 0].set_ylabel("ln P")
+    except(AttributeError):
+        [ax.set_xlabel("iteration") for ax in axes[-2, ...].flat]
+        [ax.set_visible(False) for ax  in axes[-1, ...].flat]
+    #for i, ax in enumerate(axes.T.flat): ax.axhline(result.pinitial[i], color='k', linestyle=':')
+    if save:
+        fig.savefig(root + ".chain.pdf")
+
+    # --- Corner Plot ----
+    import corner
+    cfig = corner.corner(result.chain, labels=result.scene.parameter_names,
+                         show_titles=True, fill_contours=True,
+                         plot_datapoints=False, plot_density=False)
+    if save:
+        cfig.savefig(root + ".corner.pdf")
+
+    # --- Residual ---
+    try:
+        best = result.chain[result.lnp.argmax(), :]
+    except:
+        best = result.chain[-1, :]
+        print("using last position")
+    rfig, raxes = plot_model_images(best, result.scene, result.stamps)
+    if save:
+        rfig.savefig(root + ".residual.pdf")
+
+    if show:
+        pl.show()
+    else:
+        pl.close(rfig)
+        pl.close(fig)
+        pl.close(cfig)
+
 
 def load_results(fn="sampler_demo_semi_v1.pkl"):
     with open(fn, "rb") as f:

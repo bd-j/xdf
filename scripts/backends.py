@@ -29,7 +29,7 @@ def priors(stamps, sourcepars):
 
 
 def run_pymc3(p0, scene, plans, lower=-np.inf, upper=np.inf,
-              nwarm=2000, niter=1000):
+              priors=None, nwarm=2000, niter=1000):
 
     import pymc3 as pm
     import theano.tensor as tt
@@ -39,11 +39,14 @@ def run_pymc3(p0, scene, plans, lower=-np.inf, upper=np.inf,
     pnames = scene.parameter_names
     t = time.time()
     with pm.Model() as opmodel:
-        z0 = [pm.Uniform(p, lower=l, upper=u)
-              for p, l, u in zip(pnames, lower, upper)]
+        if priors is None:
+            z0 = [pm.Uniform(p, lower=l, upper=u)
+                for p, l, u in zip(pnames, lower, upper)]
+        else:
+            z0 = priors
         theta = tt.as_tensor_variable(z0)
         pm.DensityDist('likelihood', lambda v: logl(v), observed={'v': theta})
-        trace = pm.sample(niter, tune=nwarm, cores=1, discard_tuned_samples=True)
+        trace = pm.sample(draws=niter, tune=nwarm, cores=1, discard_tuned_samples=True)
 
     tsample = time.time() - t
     
