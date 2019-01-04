@@ -9,7 +9,7 @@ from forcepho import paths
 from forcepho.likelihood import WorkPlan
 from forcepho.posterior import Posterior
 
-from xdfutils import cat_to_sourcepars, prep_scene, make_xdf_stamp, Result
+from xdfutils import cat_to_sourcepars, prep_scene, xdf_pixel_stamp, Result
 import backends
 from phoplot import plot_model_images, display
 
@@ -74,7 +74,7 @@ def setup_patch(xlo, xhi, ylo, yhi, filters=["f160w"]):
 
     # --- Setup Scene and Stamp(s) ---
 
-    stamps = [make_xdf_stamp(imnames[f], psfpaths[f], center, size, filtername=f)
+    stamps = [xdf_pixel_stamp(imnames[f], psfpaths[f], center, size, filtername=f)
               for f in filters]
 
     return sourcepars, stamps

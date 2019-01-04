@@ -27,6 +27,8 @@ mmse_size = (500, 500)
 
 
 def get_cutout(path, name, position, size):
+    """This is how the image was generated before being run through MMSE
+    """
     sci = fits.open(os.path.join(path, name+"sci.fits"))
     wht = fits.open(os.path.join(path, name+"wht.fits"))
     image = sci[0].data
@@ -42,9 +44,168 @@ def get_cutout(path, name, position, size):
     return image, weight, rms, cutout_image, cutout_image.wcs
 
 
-def make_xdf_stamp(imroot, psfname, center, size, fwhm=3.0,
-                   background=0.0, filtername="H"):
+def xdf_sky_stamp(imroot, psfname, world, wsize,
+                  fwhm=3.0, background=0.0, filtername="H"):
+    """Make a stamp with celestial coordinate information.
+    """
+    from astropy.coordinates import SkyCoord
+    from astropy import units as u
 
+    position = SkyCoord(world[0], world[1], unit="deg", frame="icrs")
+    size = wsize * u.arcsec
+
+    hdr = fits.getheader(os.path.join(base, imroot+"sci.fits"))
+    sci = fits.getdata(os.path.join(base, imroot+"sci.fits"))
+    wht = fits.getdata(os.path.join(base, imroot+"wht.fits"))
+
+    wcs = WCS(hdr)
+    image = Cutout2D(sci, position, size, wcs=wcs)
+    weight = Cutout2D(wht, position, size, wcs=wcs)
+    im = np.ascontiguousarray(image.data)
+    ivar = np.ascontiguousarray(weight.data)
+
+    # -----------
+    # --- MAKE STAMP -------
+
+    # --- Add image and uncertainty data to Stamp, flipping axis order ----
+    stamp = PostageStamp()
+    stamp.pixel_values = np.array(im).T - background
+    stamp.ierr = np.sqrt(ivar).T
+
+    # Clean errors
+    bad = ~np.isfinite(stamp.ierr)
+    stamp.pixel_values[bad] = 0.0
+    stamp.ierr[bad] = 0.0
+    stamp.ierr = stamp.ierr.flatten()
+
+    stamp.nx, stamp.ny = stamp.pixel_values.shape
+    stamp.npix = stamp.nx * stamp.ny
+    # note the inversion of x and y order in the meshgrid call here
+    stamp.ypix, stamp.xpix = np.meshgrid(np.arange(stamp.ny), np.arange(stamp.nx))
+
+
+    # --- Add WCS info to Stamp ---
+    psize = np.array(stamp.pixel_values.shape)
+    stamp.crpix = np.floor(0.5 * psize)
+    stamp.crval = image.wcs.wcs_pix2world(stamp.crpix[None,:], 0)[0, :2]
+
+    CD = image.wcs.wcs.cd
+    W = np.eye(2)
+    W[0, 0] = np.cos(np.deg2rad(stamp.crval[-1]))
+    
+    stamp.dpix_dsky = np.matmul(np.linalg.inv(CD), W)
+    stamp.scale = np.linalg.inv(CD * 3600.0)
+    stamp.CD = CD
+    stamp.W = W
+    try:
+        stamp.wcs = wcs
+    except:
+        pass
+
+    # --- Add the PSF ---
+    stamp.psf = pointspread.get_psf(psfname, fwhm)
+
+    # --- Add extra information ---
+    stamp.full_header = dict(hdr)
+    if filtername is None:
+        stamp.filtername = stamp.full_header["FILTER"]
+    else:
+        stamp.filtername = filtername
+
+    return stamp
+
+
+def xdf_cel_stamp(imroot, psfname, world, wsize,
+                  fwhm=3.0, background=0.0, filtername="H"):
+    """Make a stamp with celestial coordinate information.  A somewhat hackier
+    version of xdf_sky_stamp above.
+    """
+
+    sci = os.path.join(base, imroot+"sci.fits")
+    wht = os.path.join(base, imroot+"wht.fits")
+
+    hdr = fits.getheader(sci)
+    data = fits.getdata(sci)
+    rms = np.sqrt(1.0 / fits.getdata(wht))
+
+    ast = WCS(hdr, naxis=2)
+    CD = ast.wcs.cd
+    
+    # --- Flip axis order ---
+    im = data.T
+    err = rms.T
+
+    # ---- Extract subarray -----
+    # here we get the center coordinates in pixels (accounting for the transpose above)
+    world = np.array(world)
+    center = ast.wcs_world2pix(world[None, :], 0)[0, :2]
+    # arcsec / pix, assuming square pixels
+    plate_scale = np.mean(np.abs(np.linalg.eigvals(3600 * ast.wcs.cd)))
+    size = np.array(wsize) / plate_scale
+
+    # --- here is much mystery ---
+    lo, hi = (center - 0.5 * size).astype(int), (center + 0.5 * size).astype(int)
+    xinds = slice(int(lo[0]), int(hi[0]))
+    yinds = slice(int(lo[1]), int(hi[1]))
+    # "central" pixel in stamp
+    crpix_stamp = np.zeros(2) + np.floor(0.5 * size)
+    # pixel coordinates of stamp "center" in full image
+    crval_stamp = crpix_stamp + lo
+    # world coordinates of stamp "center"
+    crval_stamp = ast.wcs_pix2world(crval_stamp[None,:], 0)[0, :2]
+    W = np.eye(2)
+    W[0, 0] = np.cos(np.deg2rad(crval_stamp[-1]))
+
+    # -----------
+    # --- MAKE STAMP -------
+
+    # --- Add image and uncertainty data to Stamp ----
+    stamp = PostageStamp()
+    stamp.pixel_values = im[xinds, yinds] - background
+    stamp.ierr = 1./err[xinds, yinds]
+
+    bad = ~np.isfinite(stamp.ierr)
+    stamp.pixel_values[bad] = 0.0
+    stamp.ierr[bad] = 0.0
+    stamp.ierr = stamp.ierr.flatten()
+
+    stamp.nx, stamp.ny = stamp.pixel_values.shape
+    stamp.npix = stamp.nx * stamp.ny
+    # note the inversion of x and y order in the meshgrid call here
+    stamp.ypix, stamp.xpix = np.meshgrid(np.arange(stamp.ny), np.arange(stamp.nx))
+
+    # --- Add WCS info to Stamp ---
+    stamp.crpix = crpix_stamp
+    stamp.crval = crval_stamp
+    stamp.dpix_dsky = np.matmul(np.linalg.inv(CD), W)
+    stamp.scale = np.linalg.inv(CD * 3600.0)
+    stamp.pixcenter_in_full = center
+    stamp.lo = lo
+    stamp.CD = CD
+    stamp.W = W
+    try:
+        stamp.wcs = ast
+    except:
+        pass
+
+    # --- Add the PSF ---
+    stamp.psf = pointspread.get_psf(psfname, fwhm)
+
+    # --- Add extra information ---
+    stamp.full_header = dict(hdr)
+    if filtername is None:
+        stamp.filtername = stamp.full_header["FILTER"]
+    else:
+        stamp.filtername = filtername
+
+    return stamp
+
+    
+    
+def xdf_pixel_stamp(imroot, psfname, center, size, fwhm=3.0,
+                    background=0.0, filtername="H"):
+    """Make a stamp with pixel coordinate information
+    """
     # Values used to produce the MMSE catalog
     im, wght, rms, cutout, wcs = get_cutout(base, imroot, mmse_position, mmse_size)
 
