@@ -66,7 +66,10 @@ def get_gaia_star(coord_center, radius_arcsec, g_mag_cut=15.0):
     gaia_stars = Gaia.query_object_async(coordinate=coord, radius=radius)
     # choose stars with proper motion and mag cut
     prop_motion = np.sqrt(gaia_stars['pmra'].data.data**2+gaia_stars['pmdec'].data.data**2)
-    idx_good_stars = (gaia_stars['astrometric_excess_noise'].data.data < 1.0) & (prop_motion < 20.0).data & (gaia_stars['phot_g_mean_mag'].data.data > g_mag_cut)
+    idx_good_stars = ((gaia_stars['astrometric_excess_noise'].data.data < 1.0) &
+                      (prop_motion < 20.0).data &
+                      (gaia_stars['phot_g_mean_mag'].data.data > g_mag_cut)
+                      )
     print('number of stars found in GAIA :', np.sum(idx_good_stars))
     coord_gaia = SkyCoord(ra=gaia_stars[idx_good_stars]['ra'], dec=gaia_stars[idx_good_stars]['dec'], unit=(u.deg, u.deg))
     return(coord_gaia)

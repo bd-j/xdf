@@ -13,10 +13,10 @@ import backends
 from phoplot import plot_model_images, display
 
 
-psfpaths = {"f814w": None,
+psfpaths = {"f814w": "../data/psfs/mixtures/gmpsf_30mas_hst_f814w_ng4.h5",
             "f160w": "../data/psfs/mixtures/gmpsf_hst_f160w_ng3.h5"
             }
-imnames = {"f814w": "hlsp_xdf_hst_acswfc-60mas_hudf_f814w_v1_",
+imnames = {"f814w": "hlsp_xdf_hst_acswfc-30mas_hudf_f814w_v1_",
            "f160w": "hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_"
            }
     
@@ -26,7 +26,8 @@ mmse_catname = "/Users/bjohnson/Projects/xdf/data/catalogs/xdf_f160-f814_3020-34
 cat = np.array(fits.getdata(mmse_catname))
 
 
-
+# --------------------------------
+# --- Command Line Arguments ---
 parser = argparse.ArgumentParser()
 parser.add_argument("--xlo", type=int, default=-1,
                     help="low x pixel coordinate of MMSE cutout")
