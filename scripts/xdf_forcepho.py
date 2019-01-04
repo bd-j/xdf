@@ -7,8 +7,9 @@ from astropy.io import fits
 
 from forcepho import paths
 from forcepho.likelihood import WorkPlan
+from forcepho.posterior import Posterior
 
-from xdfutils import cat_to_sourcepars, prep_scene, make_xdf_stamp, Posterior, Result
+from xdfutils import cat_to_sourcepars, prep_scene, make_xdf_stamp, Result
 import backends
 from phoplot import plot_model_images, display
 
@@ -39,6 +40,9 @@ parser.add_argument("--yhi", type=int, default=-1,
                     help="high y pixel coordinate of MMSE cutout")
 parser.add_argument("--corners", type=int, nargs=4, default=[10, 40, 375, 405],
                     help="corners [xlo, xhi, ylo, yhi] of MMSE cutout")
+parser.add_argument("--add_source", type=float, nargs=2, default=[0,0],
+                    help=("Add a source by hand offset from the lower left "
+                          "corner by the amounts in this argument"))
 parser.add_argument("--filters", type=list, default=["f160w"],
                     help="names of bands to get cutouts for")
 parser.add_argument("--nwarm", type=int, default=1000,
@@ -76,6 +80,13 @@ def setup_patch(xlo, xhi, ylo, yhi, filters=["f160w"]):
     return sourcepars, stamps
 
 
+def add_source(ra, dec, primary_flux):
+    """Add a dummy source by hand
+    """
+    spars = ([primary_flux / 10.], ra, dec, 0.9, 0.0, 2, 0.1)
+    return [spars]
+
+
 if __name__ == "__main__":
 
     # ---------------
@@ -103,6 +114,11 @@ if __name__ == "__main__":
     # ---------------------
     # --- Scene & Stamps ---
     sourcepars, stamps = setup_patch(*corners, filters=filters)
+    if np.any(args.add_source != 0):
+        new = add_source(corners[0] + args.add_source[0],
+                         corners[2] + args.add_source[1],
+                         sourcepars[0][0][0])
+        sourcepars += new
 
     for stamp in stamps:
         #bkg = np.nanmedian(stamp.pixel_values[:5, :])  # stamp.full_header["BKG"]
