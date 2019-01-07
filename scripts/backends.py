@@ -3,27 +3,34 @@ from functools import partial as argfix
 import numpy as np
 import matplotlib.pyplot as pl
 
-from forcepho.likelihood import WorkPlan, lnlike_multi
-from xdfutils import Posterior, Result, LogLikeWithGrad
+from forcepho.likelihood import lnlike_multi
+from forcepho.posterior import Posterior, LogLikeWithGrad
+from xdfutils import Result
 
 
 __all__ = ["run_hemcee", "run_dynesty", "run_hmc"]
 
 
-def priors(stamps, sourcepars):
+def priors(scene, stamps, npix=2.0):
     # --------------------------------
     # --- Priors ---
-    plate_scale = np.linalg.eigvals(np.linalg.inv(stamps[0].dpix_dsky))
-    plate_scale = np.abs(plate_scale).mean()
+    plate_scale = np.abs(np.linalg.eigvals(np.linalg.inv(stamps[0].dpix_dsky)))
+    rh_range = np.array(scene.sources[0].rh_range)
+    sersic_range = np.array(scene.sources[0].sersic_range)
 
-    upper = [[5.0, s[1] + 1 * plate_scale, s[2] + 1 * plate_scale, 1.0, np.pi/2, 5.0, 0.12]
-             for s in sourcepars]
-    lower = [[0.0, s[1] - 1 * plate_scale, s[2] - 1 * plate_scale, 0.3, -np.pi/2, 1.2, 0.015]
-             for s in sourcepars]
+    lower = [s.nband * [0.] +
+             [s.ra - npix * plate_scale[0], s.dec - npix * plate_scale[1],
+              0.3, -np.pi/1.5, sersic_range[0], rh_range[0]]
+             for s in scene.sources]
+    upper = [(np.array(g.flux) * 10).tolist() +
+             [s.ra + npix * plate_scale[0], s.dec + npix * plate_scale[1],
+              1.0, np.pi/1.5, sersic_range[-1], rh_range[-1]]
+             for s in scene.sources]
     upper = np.concatenate(upper)
     lower = np.concatenate(lower)
-    fluxes = [s[0] for s in sourcepars]
-    scales = np.concatenate([f + [plate_scale, plate_scale, 0.1, 0.1, 0.1, 0.01] for f in fluxes])
+    fluxes = np.array([s.flux for s in sourcepars])
+    scales = np.concatenate([f.tolist() + [plate_scale[0], plate_scale[1], 0.1, 0.1, 0.1, 0.01]
+                             for f in fluxes])
 
     return scales, lower, upper
 
@@ -37,6 +44,7 @@ def run_pymc3(p0, scene, plans, lower=-np.inf, upper=np.inf,
     model = Posterior(scene, plans)
     logl = LogLikeWithGrad(model)
     pnames = scene.parameter_names
+    assert len(upper) == len(lower) ==len(pnames)
     t = time.time()
     with pm.Model() as opmodel:
         if priors is None:

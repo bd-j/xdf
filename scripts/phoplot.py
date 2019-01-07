@@ -7,6 +7,9 @@ import cPickle as pickle
 
 from forcepho.likelihood import make_image
 
+# code to force angular values to an interval
+# phim = np.mod((phi + np.pi / 2), np.pi) - np.pi / 2.
+
 def display(data, save=True, show=False, root="xdf"):
 
     if type(data) is str:
@@ -29,7 +32,7 @@ def display(data, save=True, show=False, root="xdf"):
     try:
         [ax.plot(result.lnp) for ax in axes[-1, ...].flat]
         [ax.set_xlabel("iteration") for ax in axes[-1, ...].flat]
-        axes[-1, 0].set_ylabel("ln P")
+        axes[-1, ...].set_ylabel("ln P")
     except(AttributeError):
         [ax.set_xlabel("iteration") for ax in axes[-2, ...].flat]
         [ax.set_visible(False) for ax  in axes[-1, ...].flat]
@@ -51,7 +54,7 @@ def display(data, save=True, show=False, root="xdf"):
     except:
         best = result.chain[-1, :]
         print("using last position")
-    rfig, raxes = plot_model_images(best, result.scene, result.stamps)
+    rfig, raxes = plot_model_images(best, result.scene, result.stamps, share=False)
     if save:
         rfig.savefig(root + ".residual.pdf")
 
@@ -61,6 +64,8 @@ def display(data, save=True, show=False, root="xdf"):
         pl.close(rfig)
         pl.close(fig)
         pl.close(cfig)
+
+    return result
 
 
 def load_results(fn="sampler_demo_semi_v1.pkl"):
@@ -180,11 +185,11 @@ def prettify_chains(axes, labels, fontsize=10, equal_axes=False,
 
     
 def plot_model_images(pos, scene, stamps, axes=None, colorbars=True,
-                      x=slice(None), y=slice(None)):
+                      x=slice(None), y=slice(None), share=True):
     vals = pos
     if axes is None:
         rfig, raxes = pl.subplots(len(stamps), 4, figsize=(14, 3.3*len(stamps) + 0.5),
-                                  sharex=True, sharey=True)
+                                  sharex=share, sharey=share)
     else:
         rfig, raxes = None, axes
     raxes = np.atleast_2d(raxes)
