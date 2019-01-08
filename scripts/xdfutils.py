@@ -129,15 +129,15 @@ def cat_to_sourcepars(catrow, celestial=False):
 def convert_region(center, size, direction="to pixels"):
     wcs = get_mmse_60mas_wcs()
     CD = wcs.wcs.cd * 3600 # convert to arcsec
-    size = np.zeros(2) + size
+    size = np.zeros(2) + np.array(size)
     if direction == "to pixels":
         pcenter = wcs.all_world2pix(center[0], center[1], 0)
         psize = np.dot(np.linalg.inv(CD), size)
-        return pcenter, psize
+        return pcenter, np.abs(psize)
     elif direction == "to sky":
         scenter = wcs.all_pix2world(center[0], center[1], 0)
         ssize = np.dot(CD, size)
-        return sscenter, ssize
+        return scenter, np.abs(ssize)
     else:
         raise(ValueError)
 

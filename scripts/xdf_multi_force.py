@@ -8,7 +8,7 @@ from astropy.io import fits
 from forcepho import paths
 from forcepho.likelihood import WorkPlan
 
-from xdfutils import setup_xdf_patch
+from xdfutils import setup_xdf_patch, prep_scene
 import backends
 from phoplot import plot_model_images, display
 
@@ -35,6 +35,8 @@ parser.add_argument("--dec", type=float, default=0,
                     help="central dec of cutout")
 parser.add_argument("--size", type=float, nargs='*', default=[1, 1],
                     help="size in arcsec of cutout")
+parser.add_argument("--sky_coordinates", type=bool, default=True,
+                    help="whether to fit in pixel coordinates or sky coordinates.")
 parser.add_argument("--add_source", type=float, nargs=2, default=[0,0],
                     help=("Add a source by hand offset from the central coordinate "
                           "by the amounts in this argument"))
@@ -76,7 +78,8 @@ if __name__ == "__main__":
 
     # ---------------------
     # --- Scene & Stamps ---
-    sourcepars, stamps, tail = setup_xdf_patch(args, filters=filters, mmse_cat=cat)
+    sourcepars, stamps, tail = setup_xdf_patch(args, filters=filters,
+                                               mmse_cat=cat, sky=args.sky_coordinates)
     if args.results_name.lower() != "none":
         rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
     else:
