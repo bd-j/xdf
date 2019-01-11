@@ -183,6 +183,7 @@ def xdf_sky_stamp(imroot, psfname, world, wsize,
     wht = fits.getdata(os.path.join(base, imroot+"wht.fits"))
 
     wcs = WCS(hdr)
+    # note size should be (ny, nx)
     image = Cutout2D(sci, position, size, wcs=wcs)
     weight = Cutout2D(wht, position, size, wcs=wcs)
     im = np.ascontiguousarray(image.data)

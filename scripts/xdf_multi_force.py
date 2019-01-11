@@ -73,13 +73,12 @@ if __name__ == "__main__":
     args = parser.parse_args()
     filters = args.filters
     nband = len(filters)
-
-    tail = "ra{:.4f}_dec{:.4f}_{}".format(args.ra, args.dec, "".join(filters))
+    splinedata = paths.galmixtures[1]
 
     # ---------------------
     # --- Scene & Stamps ---
-    sourcepars, stamps, tail = setup_xdf_patch(args, filters=filters,
-                                               mmse_cat=cat, sky=args.sky_coordinates)
+    sourcepars, stamps, tail = setup_xdf_patch(args, filters=filters, mmse_cat=cat,
+                                               sky=args.sky_coordinates)
     if args.results_name.lower() != "none":
         rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
     else:
@@ -93,10 +92,9 @@ if __name__ == "__main__":
 
     plans = [WorkPlan(stamp) for stamp in stamps]
     scene, theta = prep_scene(sourcepars, filters=filters,
-                              splinedata=paths.galmixtures[1])
+                              splinedata=splinedata)
 
-    theta_init = theta.copy()
-    p0 = theta_init.copy()
+    p0 = theta.copy()
     ndim = len(theta)
     nsource = len(sourcepars)
 
@@ -145,8 +143,6 @@ if __name__ == "__main__":
         result.dec = args.dec
         result.size = args.size
 
-        best = result.chain[-1, :]
-
         import cPickle as pickle
         if rname is not None:
             trace = result.trace
@@ -166,7 +162,6 @@ if __name__ == "__main__":
         result = backends.run_hemcee(p0, scene, plans, scales=scales,
                                      nwarm=args.nwarm, niter=args.niter)
         
-        best = result.chain[result.lnp.argmax(), :]
         result.labels = scene.parameter_names
         result.sourcepars = sourcepars
         result.stamps = stamps
