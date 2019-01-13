@@ -1,7 +1,6 @@
-import sys, argparse
+import os, sys, argparse
 
 import numpy as np
-import matplotlib.pyplot as pl
 from scipy import cov
 from astropy.io import fits
 
@@ -11,19 +10,6 @@ from forcepho.likelihood import WorkPlan
 from xdfutils import setup_xdf_patch, prep_scene
 import backends
 from phoplot import plot_model_images, display
-
-
-psfpaths = {"f814w": "../data/psfs/mixtures/gmpsf_30mas_hst_f814w_ng4.h5",
-            "f160w": "../data/psfs/mixtures/gmpsf_hst_f160w_ng3.h5"
-            }
-imnames = {"f814w": "hlsp_xdf_hst_acswfc-30mas_hudf_f814w_v1_",
-           "f160w": "hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_"
-           }
-
-# ------------------------------------
-# --- Get the MMSE catalog ---
-mmse_catname = "/Users/bjohnson/Projects/xdf/data/catalogs/xdf_f160-f814_3020-3470.fits"
-cat = np.array(fits.getdata(mmse_catname))
 
 
 # --------------------------------
@@ -54,6 +40,12 @@ parser.add_argument("--backend", type=str, default="none",
                     help="Sampling backend to use")
 parser.add_argument("--results_name", type=str, default="results/results_xdf",
                     help="root name and path for the output pickle.'none' results in no output.")
+parser.add_argument("--display", type=bool, default=False,
+                    help="Whether to plot fit information after fitting")
+parser.add_argument("--plot_dir", type=str, default="",
+                    help="Where to save plots of fit infomation.  If empty, plots are not saved")
+parser.add_argument("--xdf_dir", type=str, default="/Users/bjohnson/Projects/xdf/",
+                    help="Path to xdf repo")
 
 
 def add_source(ra, dec, primary_flux):
@@ -75,14 +67,21 @@ if __name__ == "__main__":
     nband = len(filters)
     splinedata = paths.galmixtures[1]
 
+    # ------------------------------------
+    # --- Get the MMSE catalog ---
+    mmse_catname = os.path.join(args.xdf_dir, "data","catalogs","xdf_f160-f814_3020-3470.fits")
+    cat = np.array(fits.getdata(mmse_catname))
+
     # ---------------------
     # --- Scene & Stamps ---
     sourcepars, stamps, tail = setup_xdf_patch(args, filters=filters, mmse_cat=cat,
                                                sky=args.sky_coordinates)
     if args.results_name.lower() != "none":
         rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
+        pname = os.path.split(rname)[-1]
     else:
         rname = None
+        pname = "xdf"
 
     #if np.any(np.array(args.add_source) != 0):
     #    new = add_source(args.ra + args.add_source[0],
@@ -102,7 +101,6 @@ if __name__ == "__main__":
     # --- Show initial model and data ---
     if False:
         fig, axes = plot_model_images(p0, scene, stamps, share=False)
-        pl.show()
 
     # --------------------------------
     # --- Priors and scale guesses ---
@@ -152,7 +150,7 @@ if __name__ == "__main__":
             result.trace = trace
 
         # --- Plotting
-        _ = display(result, save=False, show=True)
+        _ = display(result, savedir=args.plot_dir, show=args.display, root=pname)
         normchain = (result.chain - result.chain.mean(axis=0)) / result.chain.std(axis=0)
         corr = cov(normchain.T)
 
@@ -174,7 +172,7 @@ if __name__ == "__main__":
                 pickle.dump(result, f)
 
         # --- Plotting
-        _ = display(result, save=False, show=True)
+        _ = display(result, savedir=args.plot_dir, show=args.display, root=pname)
         normchain = (result.chain - result.chain.mean(axis=0)) / result.chain.std(axis=0)
         corr = cov(normchain.T)
 
@@ -196,12 +194,12 @@ if __name__ == "__main__":
                 pickle.dump(result, f)
 
         # --- Plotting
-        from dynesty import plotting as dyplot
-        cfig, caxes = dyplot.cornerplot(dr, fig=pl.subplots(result.ndim, result.ndim, figsize=(13., 10)),
-                                        labels=result.labels, show_titles=True, title_fmt='.8f')
-        tfig, taxes = dyplot.traceplot(dr, fig=pl.subplots(result.ndim, 2, figsize=(13., 13.)),
-                                       labels=result.label)
-        rfig, raxes = plot_model_images(best, result.scene, result.stamps)
+        #from dynesty import plotting as dyplot
+        #cfig, caxes = dyplot.cornerplot(dr, fig=pl.subplots(result.ndim, result.ndim, figsize=(13., 10)),
+        #                                labels=result.labels, show_titles=True, title_fmt='.8f')
+        #tfig, taxes = dyplot.traceplot(dr, fig=pl.subplots(result.ndim, 2, figsize=(13., 13.)),
+        #                               labels=result.label)
+        #rfig, raxes = plot_model_images(best, result.scene, result.stamps)
 
     # --- No fitting ---
     if args.backend == "none":

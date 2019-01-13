@@ -10,7 +10,7 @@ from forcepho.likelihood import make_image
 # code to force angular values to an interval
 # phim = np.mod((phi + np.pi / 2), np.pi) - np.pi / 2.
 
-def display(data, save=True, show=False, root="xdf"):
+def display(data, savedir="", show=False, root="xdf"):
 
     if type(data) is str:
         fn = data
@@ -37,16 +37,16 @@ def display(data, save=True, show=False, root="xdf"):
         [ax.set_xlabel("iteration") for ax in axes[-2, ...].flat]
         [ax.set_visible(False) for ax  in axes[-1, ...].flat]
     #for i, ax in enumerate(axes.T.flat): ax.axhline(result.pinitial[i], color='k', linestyle=':')
-    if save:
-        fig.savefig(root + ".chain.pdf")
+    if savedir != "":
+        fig.savefig(os.path.join(savedir, root + ".chain.pdf"))
 
     # --- Corner Plot ----
     import corner
     cfig = corner.corner(result.chain, labels=result.scene.parameter_names,
                          show_titles=True, fill_contours=True,
                          plot_datapoints=False, plot_density=False)
-    if save:
-        cfig.savefig(root + ".corner.pdf")
+    if savedir != "":
+        cfig.savefig(os.path.join(savedir, root + ".corner.pdf"))
 
     # --- Residual ---
     try:
@@ -55,8 +55,8 @@ def display(data, save=True, show=False, root="xdf"):
         best = result.chain[-1, :]
         print("using last position")
     rfig, raxes = plot_model_images(best, result.scene, result.stamps, share=False)
-    if save:
-        rfig.savefig(root + ".residual.pdf")
+    if savedir != "":
+        rfig.savefig(os.path.join(savedir, root + ".residual.pdf"))
 
     if show:
         pl.show()

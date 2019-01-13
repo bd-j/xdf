@@ -20,13 +20,13 @@ __all__ = ["setup_patch", "cat_to_sourcepars", "prep_scene",
            "xdf_pixel_stamp", "xdf_sky_stamp",
            "Result"]
 
-base = "/Users/bjohnson/Projects/xdf/data/images/"
+base = "/Users/bjohnson/Projects/xdf/"
 
 mmse_position = (3020, 3470)
 mmse_size = (500, 500)
 
-psfpaths = {"f814w": "../data/psfs/mixtures/gmpsf_30mas_hst_f814w_ng4.h5",
-            "f160w": "../data/psfs/mixtures/gmpsf_hst_f160w_ng3.h5"
+psfnames = {"f814w": "gmpsf_30mas_hst_f814w_ng4.h5",
+            "f160w": "gmpsf_hst_f160w_ng3.h5"
             }
 imnames = {"f814w": "hlsp_xdf_hst_acswfc-30mas_hudf_f814w_v1_",
            "f160w": "hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_"
@@ -40,13 +40,14 @@ def setup_xdf_patch(args, filters=[], sky=True, single_source=True, mmse_cat=Non
 
     cat = mmse_cat
     pixel_region = args.ra <= 0
+    base = args.xdf_dir
 
     if pixel_region:
         xlo, xhi, ylo, yhi = tuple(args.corners)
         lo, hi = np.array([xlo, ylo]), np.array([xhi, yhi])
         pcenter = np.round((hi + lo)  / 2)
         psize = hi - lo
-        scenter, ssize = convert_region(pcenter, psize, direction="to sky")
+        scenter, ssize = convert_region(pcenter, psize, direction="to sky", base=base)
         string = "x{:.0f}_y{:.0f}_{}".format(pcenter[0], pcenter[1], "".join(filters))
 
         sel = ((cat["x"] > lo[0]) & (cat["x"] < hi[0]) &
@@ -55,7 +56,7 @@ def setup_xdf_patch(args, filters=[], sky=True, single_source=True, mmse_cat=Non
     else:
         scenter = np.array([args.ra, args.dec])
         ssize = args.size
-        pcenter, psize = convert_region(scenter, ssize, direction="to pixels")
+        pcenter, psize = convert_region(scenter, ssize, direction="to pixels", base=base)
         string = "ra{:.4f}_dec{:.4f}_{}".format(args.ra, args.dec, "".join(filters))
 
         from astropy import units as u
@@ -84,7 +85,7 @@ def setup_xdf_patch(args, filters=[], sky=True, single_source=True, mmse_cat=Non
                   for flux, s in zip(fluxes, cat[sel])]
 
     # --- Make stamps ---
-    stamps = [stamper(imnames[f], psfpaths[f], center, size, filtername=f)
+    stamps = [stamper(imnames[f], psfnames[f], center, size, filtername=f, base=args.xdf_dir)
               for f in filters]
 
     return sourcepars, stamps, string
@@ -126,8 +127,8 @@ def cat_to_sourcepars(catrow, celestial=False):
     return [ra, dec, q, pa, n, rh]
 
 
-def convert_region(center, size, direction="to pixels"):
-    wcs = get_mmse_60mas_wcs()
+def convert_region(center, size, direction="to pixels", base=base):
+    wcs = get_mmse_60mas_wcs(base=base)
     CD = wcs.wcs.cd * 3600 # convert to arcsec
     size = np.zeros(2) + np.array(size)
     if direction == "to pixels":
@@ -142,8 +143,8 @@ def convert_region(center, size, direction="to pixels"):
         raise(ValueError)
 
 
-def get_mmse_60mas_wcs():
-    sci = fits.open("../data/images/hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_sci.fits")
+def get_mmse_60mas_wcs(base=base):
+    sci = fits.open(os.path.join(base, "data","images","hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_sci.fits"))
     image = sci[0].data
     wcs = WCS(sci[0].header)
     cutout_image = Cutout2D(image, mmse_position, mmse_size, wcs=wcs)
@@ -168,19 +169,22 @@ def get_cutout(path, name, position, size):
     return image, weight, rms, cutout_image, cutout_image.wcs
 
 
-def xdf_sky_stamp(imroot, psfname, world, wsize,
+def xdf_sky_stamp(imroot, psfname, world, wsize, base=base,
                   fwhm=3.0, background=0.0, filtername="H"):
     """Make a stamp with celestial coordinate information.
     """
     from astropy.coordinates import SkyCoord
     from astropy import units as u
 
+    impath = os.path.join(base, "data", "images")
+    psfpath = os.path.join(base, "data", "psfs", "mixtures")
+    
     position = SkyCoord(world[0], world[1], unit="deg", frame="icrs")
     size = wsize * u.arcsec
 
-    hdr = fits.getheader(os.path.join(base, imroot+"sci.fits"))
-    sci = fits.getdata(os.path.join(base, imroot+"sci.fits"))
-    wht = fits.getdata(os.path.join(base, imroot+"wht.fits"))
+    hdr = fits.getheader(os.path.join(impath, imroot+"sci.fits"))
+    sci = fits.getdata(os.path.join(impath, imroot+"sci.fits"))
+    wht = fits.getdata(os.path.join(impath, imroot+"wht.fits"))
 
     wcs = WCS(hdr)
     # note size should be (ny, nx)
@@ -204,7 +208,6 @@ def xdf_sky_stamp(imroot, psfname, world, wsize,
     stamp.ierr = stamp.ierr.flatten()
 
     stamp.nx, stamp.ny = stamp.pixel_values.shape
-    stamp.npix = stamp.nx * stamp.ny
     # note the inversion of x and y order in the meshgrid call here
     stamp.ypix, stamp.xpix = np.meshgrid(np.arange(stamp.ny), np.arange(stamp.nx))
 
@@ -228,7 +231,7 @@ def xdf_sky_stamp(imroot, psfname, world, wsize,
         pass
 
     # --- Add the PSF ---
-    stamp.psf = pointspread.get_psf(psfname, fwhm)
+    stamp.psf = pointspread.get_psf(os.path.join(psfpath, psfname), fwhm)
 
     # --- Add extra information ---
     stamp.full_header = dict(hdr)
@@ -241,11 +244,14 @@ def xdf_sky_stamp(imroot, psfname, world, wsize,
 
     
 def xdf_pixel_stamp(imroot, psfname, center, size, fwhm=3.0,
-                    background=0.0, filtername="H"):
+                    background=0.0, filtername="H", base=base):
     """Make a stamp with pixel coordinate information.
     """
+    impath = os.path.join(base, "data", "images")
+    psfpath = os.path.join(base, "data", "psfs", "mixtures")
+    
     # Values used to produce the MMSE catalog
-    im, wght, rms, cutout, wcs = get_cutout(base, imroot, mmse_position, mmse_size)
+    im, wght, rms, cutout, wcs = get_cutout(impath, imroot, mmse_position, mmse_size)
 
     # transpose to get x coordinate on the first axis
     im = im.T
@@ -276,7 +282,6 @@ def xdf_pixel_stamp(imroot, psfname, center, size, fwhm=3.0,
     stamp.ierr = stamp.ierr.flatten()
 
     stamp.nx, stamp.ny = stamp.pixel_values.shape
-    stamp.npix = stamp.nx * stamp.ny
     # note the inversion of x and y order in the meshgrid call here
     stamp.ypix, stamp.xpix = np.meshgrid(np.arange(stamp.ny), np.arange(stamp.nx))
 
@@ -291,7 +296,7 @@ def xdf_pixel_stamp(imroot, psfname, center, size, fwhm=3.0,
     stamp.W = W
 
     # --- Add the PSF ---
-    stamp.psf = pointspread.get_psf(psfname, fwhm)
+    stamp.psf = pointspread.get_psf(os.path.join(psfpath, psfname), fwhm)
 
     stamp.filtername = filtername
     return stamp
