@@ -80,7 +80,7 @@ def setup_xdf_patch(args, filters=[], sky=True, single_source=True, mmse_cat=Non
         center, size = pcenter, psize
 
     # --- Set up Scene ---
-    fluxes = [[f*2.0 for filt in filters] for f in cat[sel]["flux"]]
+    fluxes = [[f*4.0 for filt in filters] for f in cat[sel]["flux"]]
     sourcepars = [tuple([flux] + cat_to_sourcepars(s, celestial=celestial))
                   for flux, s in zip(fluxes, cat[sel])]
 
