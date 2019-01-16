@@ -28,6 +28,8 @@ parser.add_argument("--add_source", type=float, nargs=2, default=[0,0],
                           "by the amounts in this argument"))
 parser.add_argument("--corners", type=int, nargs=4, default=[10, 40, 375, 405],
                     help="corners [xlo, xhi, ylo, yhi] of MMSE cutout")
+parser.add_argument("--bufferpix", type=int, default=0,
+                    help="add sources to scene that are `bufferpix` outside of stamp edges")
 parser.add_argument("--filters", type=str, nargs="*", default=["f160w"],
                     help="names of bands to get cutouts for")
 parser.add_argument("--nwarm", type=int, default=1000,
@@ -74,8 +76,8 @@ if __name__ == "__main__":
 
     # ---------------------
     # --- Scene & Stamps ---
-    sourcepars, stamps, tail = setup_xdf_patch(args, filters=filters, mmse_cat=cat,
-                                               sky=args.sky_coordinates)
+    srcpars, stamps, tail = setup_xdf_patch(args, filters=filters, mmse_cat=cat,
+                                            sky=args.sky_coordinates, bufferpix=args.bufferpix)
     if args.results_name.lower() != "none":
         rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
         pname = os.path.split(rname)[-1]
@@ -86,16 +88,16 @@ if __name__ == "__main__":
     #if np.any(np.array(args.add_source) != 0):
     #    new = add_source(args.ra + args.add_source[0],
     #                     args.dec + args.add_source[1],
-    #                     sourcepars[0][0][0])
-    #    sourcepars += new
+    #                     srcpars[0][0][0])
+    #    srcpars += new
 
     plans = [WorkPlan(stamp) for stamp in stamps]
-    scene, theta = prep_scene(sourcepars, filters=filters,
+    scene, theta = prep_scene(srcpars, filters=filters,
                               splinedata=splinedata)
 
     p0 = theta.copy()
     ndim = len(theta)
-    nsource = len(sourcepars)
+    nsource = len(srcpars)
 
     # --------------------------------
     # --- Show initial model and data ---
@@ -113,7 +115,7 @@ if __name__ == "__main__":
              [s.ra - npix * plate_scale[0], s.dec - npix * plate_scale[1],
               0.3, -np.pi/1.5, sersic_range[0], rh_range[0]]
              for s in scene.sources]
-    upper = [(np.array(s.flux) * 10).tolist() +
+    upper = [(np.array(s.flux) * 500).tolist() +
              [s.ra + npix * plate_scale[0], s.dec + npix * plate_scale[1],
               1.0, np.pi/1.5, sersic_range[-1], rh_range[-1]]
              for s in scene.sources]
@@ -133,13 +135,14 @@ if __name__ == "__main__":
                                     nwarm=args.nwarm, niter=args.niter)
 
         result.labels = scene.parameter_names
-        result.sourcepars = sourcepars
+        result.sourcepars = srcpars
         result.stamps = stamps
         result.filters = filters
         result.corners = args.corners
         result.ra = args.ra
         result.dec = args.dec
         result.size = args.size
+        result.args = args
 
         import cPickle as pickle
         if rname is not None:
@@ -161,10 +164,11 @@ if __name__ == "__main__":
                                      nwarm=args.nwarm, niter=args.niter)
         
         result.labels = scene.parameter_names
-        result.sourcepars = sourcepars
+        result.sourcepars = srcpars
         result.stamps = stamps
         result.filters = filters
         result.corners = corners
+        result.args = args
 
         import cPickle as pickle
         if rname is not None:
@@ -184,9 +188,10 @@ if __name__ == "__main__":
 
         best = result.chain[result.lnp.argmax(), :]
         result.labels = scene.parameter_names
-        result.sourcepars = sourcepars
+        result.sourcepars = srcpars
         result.stamps = stamps
         result.filters = filters
+        result.args = args
 
         import cPickle as pickle
         if rname is not None:

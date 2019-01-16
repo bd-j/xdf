@@ -14,7 +14,7 @@ def display(data, savedir="", show=False, root="xdf"):
 
     if type(data) is str:
         fn = data
-        root = os.path.join("figures", fn.split("results_")[-1].replace('.pkl', ''))
+        root = fn.split("/")[-1].replace('.pkl', '')
         with open(fn, "r") as f:
             try:
                 result = pickle.load(f)
@@ -24,8 +24,12 @@ def display(data, savedir="", show=False, root="xdf"):
     else:
         result = data
 
+    if (show is False) & (savedir == ""):
+        return result
+
     # --- Chains ---
-    fig, axes = pl.subplots(7+1, len(result.scene.sources), sharex=True, figsize=(13, 12))
+    npar = np.max([s.nparam for s in result.scene.sources])
+    fig, axes = pl.subplots(npar+1, len(result.scene.sources), sharex=True, figsize=(13, 12))
     for i, ax in enumerate(axes[:-1, ...].T.flat):
         ax.plot(result.chain[:, i])
         ax.set_ylabel(result.scene.parameter_names[i])
@@ -203,6 +207,7 @@ def plot_model_images(pos, scene, stamps, axes=None, colorbars=True,
             ci = raxes[i, j].imshow(ii[x, y].T, origin='lower')       
             if (rfig is not None) & colorbars:
                 cb = rfig.colorbar(ci, ax=raxes[i,j], orientation='horizontal')
+                cb.ax.set_xticklabels(cb.ax.get_xticklabels(), rotation=-55)
         text = "{}\n({}, {})".format(stamp.filtername, stamp.crval[0], stamp.crval[1])
         ax = raxes[i, 1]
         ax.text(0.6, 0.1, text, transform=ax.transAxes, fontsize=10)

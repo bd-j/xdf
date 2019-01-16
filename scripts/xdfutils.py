@@ -33,7 +33,7 @@ imnames = {"f814w": "hlsp_xdf_hst_acswfc-30mas_hudf_f814w_v1_",
            }
 
 
-def setup_xdf_patch(args, filters=[], sky=True, single_source=True, mmse_cat=None):
+def setup_xdf_patch(args, filters=[], sky=True, bufferpix=0, single_source=True, mmse_cat=None):
 
     # Get region and choose sources.
     # Based on either pixel coordinates or celestial coordinates
@@ -50,8 +50,8 @@ def setup_xdf_patch(args, filters=[], sky=True, single_source=True, mmse_cat=Non
         scenter, ssize = convert_region(pcenter, psize, direction="to sky", base=base)
         string = "x{:.0f}_y{:.0f}_{}".format(pcenter[0], pcenter[1], "".join(filters))
 
-        sel = ((cat["x"] > lo[0]) & (cat["x"] < hi[0]) &
-               (cat["y"] > lo[1]) & (cat["y"] < hi[1]))
+        sel = ((cat["x"] > (lo[0] - bufferpix)) & (cat["x"] < (hi[0] + bufferpix)) &
+               (cat["y"] > (lo[1] - bufferpix)) & (cat["y"] < (hi[1] + bufferpix)))
 
     else:
         scenter = np.array([args.ra, args.dec])
@@ -188,6 +188,7 @@ def xdf_sky_stamp(imroot, psfname, world, wsize, base=base,
 
     wcs = WCS(hdr)
     # note size should be (ny, nx)
+    flipped_size = (np.zeros(2) + np.array(wsize))[::-1] * u.arcsec
     image = Cutout2D(sci, position, size, wcs=wcs)
     weight = Cutout2D(wht, position, size, wcs=wcs)
     im = np.ascontiguousarray(image.data)

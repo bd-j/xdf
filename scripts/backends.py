@@ -28,7 +28,7 @@ def priors(scene, stamps, npix=2.0):
              for s in scene.sources]
     upper = np.concatenate(upper)
     lower = np.concatenate(lower)
-    fluxes = np.array([s.flux for s in sourcepars])
+    fluxes = np.array([s.flux for s in scene.sources])
     scales = np.concatenate([f.tolist() + [plate_scale[0], plate_scale[1], 0.1, 0.1, 0.1, 0.01]
                              for f in fluxes])
 
