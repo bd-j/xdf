@@ -46,7 +46,7 @@ def in_region(xx, yy, corners):
 if __name__ == "__main__":
 
     base = "/Users/bjohnson/Projects/xdf/data/images/"
-
+    outfile = "junk.dat"
 
     hband, hzp = "hlsp_xdf_hst_wfc3ir-60mas_hudf_f160w_v1_", 25.94
     iband, izp = "hlsp_xdf_hst_acswfc-60mas_hudf_f814w_v1_", 25.94
@@ -100,14 +100,17 @@ if __name__ == "__main__":
         regions.append(tuple(corners.astype(int)))
 
     # --- Plot the image ---
-    fig, ax = pl.subplots()
+    fig, ax = pl.subplots(figsize=(17, 12.5))
     # Note we don't transpose because we haven't transposed from the fits input
-    cm = ax.imshow(im, origin="lower")
+    lnim = np.log(im - im.min())
+    #lnim[~np.isfinite(lnim)] = np.nanmedian(lnim)
+    cm = ax.imshow(lnim, origin="lower", cmap="Greys")
     cbar = pl.colorbar(cm, ax=ax)
-    ax.plot(mmse_cat["x"], mmse_cat["y"], 'o')
+    ax.plot(mmse_cat["x"], mmse_cat["y"], 'o', color="royalblue", label="MMSE")
     hst_idx = (hst_original.min(axis=0) > 0) & (hst_original.max(axis=0) < 500)
-    ax.plot(*hst_original[:, hst_idx], marker='o', linestyle='')
-
+    ax.plot(*hst_original[:, hst_idx], marker='o', linestyle='', color="magenta", label="3DHST")
+    fig.savefig("figures/catalogs.pdf")
+    
     # --- clean up the regions and get stats ---
     rinds, _ = np.unique(in_a_stamp, return_counts=True)
     reg = [regions[int(i)] for i in rinds]
@@ -115,11 +118,13 @@ if __name__ == "__main__":
     ngal = np.array([in_region(mmse_cat["x"], mmse_cat["y"], c).sum() for c in regions])
     sizes = np.array([c[1] - c[0] for c in regions])
 
+
+    
     # --- write and plot the regions ---
     colors = ["tomato"]
-    rfile = open("xdf_regions.dat", "w")
-    rfile.write("xlo   xhi   ylo   yhi    npix  nsource\n")
-    line = "{:3.0f}  {:3.0f}  {:3.0f}  {:3.0f}  {:4.0f}  {:2.0f}\n"
+    #rfile = open(outfile, "w")
+    #rfile.write("xlo   xhi   ylo   yhi    npix  nsource\n")
+    #line = "{:3.0f}  {:3.0f}  {:3.0f}  {:3.0f}  {:4.0f}  {:2.0f}\n"
     for i,corners in enumerate(regions):
         xy = (corners[0], corners[2])
         r = Rectangle(xy, corners[1] - corners[0], corners[3] - corners[2],
@@ -127,10 +132,12 @@ if __name__ == "__main__":
         ax.add_patch(r)
         ax.text(xy[0], xy[1], "{:3.0f}:{:2.0f}".format(i, ngal[i]))
         vals = list(corners) + [sizes[i]**2, ngal[i]]
-        rfile.write(line.format(*vals))
+    #    rfile.write(line.format(*vals))
 
-    rfile.close()    
-    pl.show()
+    #rfile.close()    
+    #pl.show()
+
+    fig.savefig("figures/regions.pdf")
     sys.exit()
 
     

@@ -57,6 +57,13 @@ def add_source(ra, dec, primary_flux):
     return [spars]
 
 
+def save_results(result, rname):
+    import cPickle as pickle
+    if rname is not None:
+        with open("{}.pkl".format(rname), "wb") as f:
+            pickle.dump(result, f)
+
+
 if __name__ == "__main__":
 
     # ---------------
@@ -65,6 +72,7 @@ if __name__ == "__main__":
     # ---------------------
     # --- variables and file names ---
     args = parser.parse_args()
+    print(args)
     filters = args.filters
     nband = len(filters)
     splinedata = paths.galmixtures[1]
@@ -115,7 +123,7 @@ if __name__ == "__main__":
              [s.ra - npix * plate_scale[0], s.dec - npix * plate_scale[1],
               0.3, -np.pi/1.5, sersic_range[0], rh_range[0]]
              for s in scene.sources]
-    upper = [(np.array(s.flux) * 500).tolist() +
+    upper = [(np.array(s.flux) * 20).tolist() +
              [s.ra + npix * plate_scale[0], s.dec + npix * plate_scale[1],
               1.0, np.pi/1.5, sersic_range[-1], rh_range[-1]]
              for s in scene.sources]
@@ -138,19 +146,12 @@ if __name__ == "__main__":
         result.sourcepars = srcpars
         result.stamps = stamps
         result.filters = filters
-        result.corners = args.corners
-        result.ra = args.ra
-        result.dec = args.dec
-        result.size = args.size
         result.args = args
 
-        import cPickle as pickle
-        if rname is not None:
-            trace = result.trace
-            result.trace = None
-            with open("{}.pkl".format(rname), "wb") as f:
-                pickle.dump(result, f)
-            result.trace = trace
+        trace = result.trace
+        result.trace = None
+        save_results(result, rname)
+        result.trace = trace
 
         # --- Plotting
         _ = display(result, savedir=args.plot_dir, show=args.display, root=pname)
@@ -167,13 +168,9 @@ if __name__ == "__main__":
         result.sourcepars = srcpars
         result.stamps = stamps
         result.filters = filters
-        result.corners = corners
         result.args = args
 
-        import cPickle as pickle
-        if rname is not None:
-            with open("{}.pkl".format(rname), "wb") as f:
-                pickle.dump(result, f)
+        save_results(result, rname)
 
         # --- Plotting
         _ = display(result, savedir=args.plot_dir, show=args.display, root=pname)
@@ -193,10 +190,8 @@ if __name__ == "__main__":
         result.filters = filters
         result.args = args
 
-        import cPickle as pickle
-        if rname is not None:
-            with open("{}.pkl".format(rname), "wb") as f:
-                pickle.dump(result, f)
+        save_results(result, rname)
+
 
         # --- Plotting
         #from dynesty import plotting as dyplot

@@ -5,10 +5,17 @@ import matplotlib.pyplot as pl
 
 from forcepho.likelihood import lnlike_multi
 from forcepho.posterior import Posterior, LogLikeWithGrad
-from xdfutils import Result
 
 
-__all__ = ["run_hemcee", "run_dynesty", "run_hmc"]
+__all__ = ["Result", "run_hemcee", "run_dynesty", "run_hmc"]
+
+
+class Result(object):
+    """A simple namespace for storing information about a run.
+    """
+    
+    def __init__(self):
+        self.offsets = None
 
 
 def priors(scene, stamps, npix=2.0):

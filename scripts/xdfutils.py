@@ -17,8 +17,7 @@ except:
 
 __all__ = ["setup_patch", "cat_to_sourcepars", "prep_scene",
            "convert_region", "get_cutout", "get_mmse_60mas_wcs",
-           "xdf_pixel_stamp", "xdf_sky_stamp",
-           "Result"]
+           "xdf_pixel_stamp", "xdf_sky_stamp"]
 
 base = "/Users/bjohnson/Projects/xdf/"
 
@@ -302,10 +301,11 @@ def xdf_pixel_stamp(imroot, psfname, center, size, fwhm=3.0,
     stamp.filtername = filtername
     return stamp
 
-    
 
 class Result(object):
-
+    """A simple namespace for storing information about a run.
+    """
+    
     def __init__(self):
         self.offsets = None
 
