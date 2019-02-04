@@ -21,7 +21,7 @@ parser.add_argument("--dec", type=float, default=0,
                     help="central dec of cutout")
 parser.add_argument("--size", type=float, nargs='*', default=[1, 1],
                     help="size in arcsec of cutout")
-parser.add_argument("--sky_coordinates", type=bool, default=True,
+parser.add_argument("--pix_coordinates", action="store_true",
                     help="whether to fit in pixel coordinates or sky coordinates.")
 parser.add_argument("--add_source", type=float, nargs=2, default=[0,0],
                     help=("Add a source by hand offset from the central coordinate "
@@ -42,7 +42,7 @@ parser.add_argument("--backend", type=str, default="none",
                     help="Sampling backend to use")
 parser.add_argument("--results_name", type=str, default="results/results_xdf",
                     help="root name and path for the output pickle.'none' results in no output.")
-parser.add_argument("--display", type=bool, default=False,
+parser.add_argument("--display", action="store_true",
                     help="Whether to plot fit information after fitting")
 parser.add_argument("--plot_dir", type=str, default="",
                     help="Where to save plots of fit infomation.  If empty, plots are not saved")
@@ -85,7 +85,7 @@ if __name__ == "__main__":
     # ---------------------
     # --- Scene & Stamps ---
     srcpars, stamps, tail = setup_xdf_patch(args, filters=filters, mmse_cat=cat,
-                                            sky=args.sky_coordinates, bufferpix=args.bufferpix)
+                                            sky=~args.pix_coordinates, bufferpix=args.bufferpix)
     if args.results_name.lower() != "none":
         rname = "{}_{}_{}".format(args.results_name, tail, args.backend)
         pname = os.path.split(rname)[-1]
