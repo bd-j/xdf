@@ -6,9 +6,9 @@ from astropy.io import fits
 
 from forcepho import paths
 from forcepho.likelihood import WorkPlan
+from forcepho import fitting as backends
 
 from xdfutils import setup_xdf_patch, prep_scene
-import backends
 from phoplot import plot_model_images, display
 
 
