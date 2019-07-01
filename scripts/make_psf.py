@@ -69,7 +69,7 @@ def get_gaia_star(coord_center, radius_arcsec, g_mag_cut=15.0):
     idx_good_stars = ((gaia_stars['astrometric_excess_noise'].data.data < 1.0) &
                       (prop_motion < 20.0).data &
                       (gaia_stars['phot_g_mean_mag'].data.data > g_mag_cut)
-                      )
+                      ).astype(bool)
     print('number of stars found in GAIA :', np.sum(idx_good_stars))
     coord_gaia = SkyCoord(ra=gaia_stars[idx_good_stars]['ra'], dec=gaia_stars[idx_good_stars]['dec'], unit=(u.deg, u.deg))
     return(coord_gaia)
@@ -110,7 +110,8 @@ def fit_star(psf_data, type_fit):
     return(p)
 
 
-def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, g_mag_cut=15.0, return_stamps=False, verbose=False):
+def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, 
+            g_mag_cut=15.0, return_stamps=False, verbose=False):
     '''
     Determines PSF from image from GAIA stars.
     '''
@@ -119,9 +120,15 @@ def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, g_mag_cut=15.0, 
     # laod GAIA stars
     coord_gaia = get_gaia_star(coord_center, radius_arcsec, g_mag_cut=g_mag_cut)
     # iterate over all stars in GAIA
-    psf_mat = np.nan*np.zeros([len(coord_gaia)/2, int(factor_enlarge*psf_size), int(factor_enlarge*psf_size)])
-    for ii_star in range(len(coord_gaia)/2):
-        star_cutout = make_cutout(img_data, wcs_img, coord_gaia[ii_star], size=factor_enlarge*psf_size, show_img=verbose)
+    ngaia = int(len(coord_gaia))
+    print(ngaia)
+    npix = int(factor_enlarge*psf_size)
+    psf_mat = np.nan*np.zeros([ngaia, npix, npix])
+    for ii_star in range(ngaia):
+        try:
+            star_cutout = make_cutout(img_data, wcs_img, coord_gaia[ii_star], size=factor_enlarge*psf_size, show_img=verbose)
+        except:
+            continue
         star_fit = fit_star(star_cutout.data, type_fit='Moffat')
         # print star_fit
         dx, dy = 0.5*star_cutout.data.shape[0]-star_fit.parameters[1], 0.5*star_cutout.data.shape[1]-star_fit.parameters[2]
@@ -133,7 +140,7 @@ def get_PSF(path_image, path_psf, psf_size, factor_enlarge=1.2, g_mag_cut=15.0, 
         star_cutout_shifted_norm = star_cutout_shifted/np.nansum(star_cutout_shifted)
         psf_mat[ii_star, :, :] = star_cutout_shifted_norm
     # combine PSFs to one PSF
-    PSF_combined = np.median(psf_mat, axis=0)
+    PSF_combined = np.nanmedian(psf_mat, axis=0)
     # cut to right size
     edge_cut = int(0.5*(psf_mat.shape[1]-psf_size))
     PSF_final = PSF_combined[edge_cut:-edge_cut, edge_cut:-edge_cut]
@@ -157,11 +164,9 @@ parser.add_argument("--path_image", type=str,
 parser.add_argument("--psf_name", type=str,
                     default='PSF_30mas_f814w.fits',
                     help="name of the PSF file")
-parser.add_argument("--save_pdf", type=bool,
-                    default=False,
+parser.add_argument("--save_pdf", action="store_true",
                     help="whether to save a PDF of the PSF")
-parser.add_argument("--verbose", type=bool,
-                    default=False,
+parser.add_argument("--verbose", action="store_true",
                     help="Say stuff?")
 #parser.add_argument("--band", type=str, default="f814w",
 #                    help="name of the PSF file")
@@ -174,7 +179,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     path_PSF = os.path.join(args.psf_base, args.psf_name)
-    PSF = get_PSF(args.path_image, path_PSF, 100.0, factor_enlarge=1.2, g_mag_cut=15.0, verbose=args.verbose)
+    PSF, stamps = get_PSF(args.path_image, path_PSF, 100.0, factor_enlarge=1.2, 
+                          g_mag_cut=15.0, verbose=args.verbose, return_stamps=True)
 
     pfig, pax = pl.subplots()
     pax.imshow(np.log10(PSF))

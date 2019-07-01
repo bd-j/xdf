@@ -3,7 +3,10 @@ import numpy as np
 import matplotlib.pyplot as pl
 from matplotlib import gridspec
 from matplotlib.backends.backend_pdf import PdfPages
-import cPickle as pickle
+try:
+    import cPickle as pickle
+except(ImportError):
+    import pickle
 
 from forcepho.likelihood import make_image
 

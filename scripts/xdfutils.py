@@ -15,7 +15,7 @@ except:
     pass
 
 
-__all__ = ["setup_patch", "cat_to_sourcepars", "prep_scene",
+__all__ = ["setup_xdf_patch", "cat_to_sourcepars", "prep_scene",
            "convert_region", "get_cutout", "get_mmse_60mas_wcs",
            "xdf_pixel_stamp", "xdf_sky_stamp"]
 
