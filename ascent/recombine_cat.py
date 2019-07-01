@@ -12,8 +12,6 @@ import h5py
 import matplotlib.pyplot as pl
 pl.ion()
 
-from forcepho.fitting import Result
-from forcepho.likelihood import lnlike_multi, make_image, WorkPlan
 from patch_conversion import patch_conversion, zerocoords, set_inactive
 
 from astropy.coordinates import SkyCoord
@@ -83,14 +81,19 @@ def query_3dhst(ra, dec, bands):
     return sep, row
 
 
-def add_source(source, chain):
+def add_source(source, chain, covar=False):
 
     row = np.zeros(1, dtype=catalog_dtype)
     for band in source.filternames:
         ind = source.filter_index(band)
         f = chain[:, ind]
+        if covar:
+            C = np.cov(chain.T)
+            f160w = chain[:, source.filter_index("f160w")]
+        else:
+            f160w = 1.0
         row[band] = f.mean()
-        row[err.format(band)] = f.std()
+        row[err.format(band)] = (f/f160w).std()
     start = source.nband
     for i, p in enumerate(shape_pars):
         ind = start + i
@@ -148,36 +151,54 @@ def get_patch(resultname, splinedata=splinedata, psfpath=psfpath):
     return stamps, miniscene, chain, pra, pdec
 
 
+def get_color(cat, bands, err=err):
+    color = -2.5*np.log10(cat[bands[0]] / force[bands[1]])
+    merr = [1.086 * cat[err.format(b)] / cat[b] for b in bands]
+    cerr = np.hypot(*merr)
+    return color, cerr
+
+def get_mag(cat, band, err=err):
+    mag = band_map[band][1] - 2.5*np.log10(cat[band])
+    mag_e = 1.086*(cat[err.format(band)]/ cat[band])
+    return mag, mag_e
 
 if __name__ == "__main__":
-    pids = [90, 91, 157, 159, 183, 274, 382, 653]
-    pid = 159
-    force, threed = [], []
-    for pid in pids:
-        fp, td = add_patch(pid)
-        force.append(fp)
-        threed.append(td)
-        
-    force = np.concatenate(force)
-    threed = np.concatenate(threed)
     
-    fits.writeto("ascent_xdf_forcepho.fits", force, overwrite=True)
-    fits.writeto("ascent_xdf_threedhst.fits", threed, overwrite=True)
-    
+    if False:
+        pids = [90, 91, 157, 159, 183, 274, 382, 653]
+        pid = 159
+        force, threed = [], []
+        for pid in pids:
+            fp, td = add_patch(pid)
+            force.append(fp)
+            threed.append(td)
+
+        force = np.concatenate(force)
+        threed = np.concatenate(threed)
+
+        fits.writeto("ascent_xdf_forcepho.fits", force, overwrite=True)
+        fits.writeto("ascent_xdf_threedhst.fits", threed, overwrite=True)
+    else:
+        force = fits.getdata("ascent_xdf_forcepho.fits")
+        threed = fits.getdata("ascent_xdf_threedhst.fits")
+
+
     good = force["patchID"] != 274
     force = force[good]
     threed = threed[good]
     
-    xx = np.linspace(-3, 3, 100)
+    xx = np.linspace(-3, 3, 100) + 26.0
     
     # --- Plot magnitudes ---
-    mf, mt = -2.5*np.log10(force["f160w"]), -2.5*np.log10(threed["f160w"])
-    mf_e, mt_e = 1.086*(force["f160w_err"]/ force["f160w"]), 1.086*(threed["f160w_err"]/ threed["f160w"])
+    ref_band = "f160w"
+    mf, mf_e = get_mag(force, ref_band)
+    mt, mt_e = get_mag(threed, ref_band)
+
     ffig, faxes = pl.subplots(1, 2, figsize=(20, 8))
     fax = faxes[0]
     fax.errorbar(mt, mf, xerr=mt_e, yerr=mf_e, marker="o", linestyle="", color="slateblue")
-    fax.set_xlabel(r"$m_{f160w} - 26$ (3DHST)")
-    fax.set_ylabel(r"$m_{f160w} - 26$ (force)")
+    fax.set_xlabel(r"$m_{{{}}} - 26$ (3DHST)".format(ref_band))
+    fax.set_ylabel(r"$m_{{{}}} - 26$ (force)".format(ref_band))
     fax.plot(xx, xx, linestyle = "--", color="red")
     fax.plot(xx, xx-0.2, linestyle=":", color="red", label=r"$\pm 0.2 \, mag$")
     fax.plot(xx, xx+0.2, linestyle=":", color="red")
@@ -185,10 +206,13 @@ if __name__ == "__main__":
     
     fax = faxes[1]
     chi = (mf - mt) / np.sqrt(mf_e**2 + mt_e**2)
-    fax.hist(chi, bins=20, alpha=0.5, color="slateblue")
+    gg = np.isfinite(chi)
+    fax.hist(chi[gg], bins=20, alpha=0.5, color="slateblue")
     fax.set_xlabel(r"$\chi = \frac{\Delta m}{\sqrt{\sigma_{force}^2 + \sigma_{3D}^2}}$")   
     fax.text(0.1, 0.7, "std. dev. = {:2.2f}".format(chi.std()), transform=fax.transAxes)
     ffig.savefig("flux_comparison.pdf")
+    
+    #sys.exit()
     
     zz = zip(force["patchID"], force["sourceID"], mt, chi)
     
@@ -196,3 +220,26 @@ if __name__ == "__main__":
     
     # --- Plot colors ---
      
+    mmax = 26.0
+    xx -= 26.0
+
+    b = ("f814w", "f160w")
+     
+    cf, cf_e = get_color(force, b)
+    ch, ch_e = get_color(threed, b)
+    g = mt < mmax
+     
+    cfig, caxes = pl.subplots(1, 1, figsize=(10, 8), squeeze=False)
+    cax = caxes[0, 0]
+    cax.errorbar(ch, cf, xerr=ch_e, yerr=cf_e, marker="o", linestyle="", color="slateblue")
+    cax.errorbar(ch[g], cf[g], xerr=ch_e[g], yerr=cf_e[g], marker="o", 
+                 linestyle="", color="forestgreen", label=r"$F160W_{{3DHST}} < {:3.1f}$".format(mmax))
+    cax.set_xlabel("{}-{} (3DHST)".format(*b))
+    cax.set_ylabel("{}-{} (force)".format(*b))
+    cax.plot(xx, xx, linestyle = "--", color="red")
+    cax.plot(xx, xx-0.2, linestyle=":", color="red", label=r"$\pm 0.2 \, mag$")
+    cax.plot(xx, xx+0.2, linestyle=":", color="red")
+    cax.set_xlim(-2, 3)
+    cax.set_ylim(-2, 3)
+    cax.legend()
+    cfig.savefig("color_comparison.pdf")
