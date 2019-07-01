@@ -1,0 +1,18 @@
+#!/bin/bash
+# Begin LSF Directives
+#BSUB -P GEN126
+#BSUB -W 3:00
+#BSUB -nnodes 1
+#BSUB -alloc_flags gpumps
+#BSUB -J jades_udf_withpatches
+#BSUB -o jades_udf_withpatches.%J
+#BSUB -e jades_udf_withpatches.%J
+
+MYGPFS=/gpfs/wolf/gen126/scratch/${USER}
+export THEANO_FLAGS="base_compiledir=$MYGPFS/theanocache" #,floatX=float32"
+source activate ~/test_env
+
+date
+
+cd ~/forcepho/tests/
+jsrun -n1 -g1 -a1 -c1 python run_patch_gpu_xdf.py
