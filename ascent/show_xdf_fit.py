@@ -9,16 +9,13 @@ individual objects.
 import sys, os
 from os.path import join as pjoin
 import numpy as np
-import h5py
 import matplotlib.pyplot as pl
 pl.ion()
 
 from forcepho.fitting import Result
 from forcepho.likelihood import lnlike_multi, make_image, WorkPlan
-from patch_conversion import patch_conversion, zerocoords, set_inactive
 
-from astropy.coordinates import SkyCoord
-from astropy import units as u
+from disputils import get_patch, query_3dhst
 from astropy.io import fits
 
 #_print = print
@@ -35,40 +32,10 @@ band_map = {"f160w": ("f_F160W", 25.94),
             }
 
 
-
 path_to_data = "/Users/bjohnson/Projects/xdf/data/"
 path_to_results = "/Users/bjohnson/Projects/xdf/results/"
 splinedata = pjoin(path_to_data, "sersic_mog_model.smooth=0.0150.h5")
 psfpath = pjoin(path_to_data, "psfs", "mixtures")
-threedhst_cat = fits.getdata("/Users/bjohnson/Projects/xdf/data/catalogs/goodss_3dhst.v4.1.cat.FITS")
-extras = ["ra", "dec", "tot_cor", "a_image", "b_image", "theta_J2000", "kron_radius"]
-
-def query_3dhst(ra, dec, bands, extras=extras):
-    hst = SkyCoord(ra=threedhst_cat['ra'], dec=threedhst_cat['dec'], unit=(u.deg, u.deg))
-    force = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
-    idx, sep, _ = force.match_to_catalog_sky(hst)
-
-    cols = [(b, np.float) for b in bands]
-    cols += [("{}_err".format(b), np.float) for b in bands]
-    cols += [(n, np.float) for n in extras]
-    cols += [("id", np.int)]
-    dtype = np.dtype(cols)
-    row = np.zeros(1, dtype=dtype)
-    catrow = threedhst_cat[idx]
-    for n in extras:
-        row[0][n] = catrow[n]
-    for b in bands:
-        try:
-            # account for differnce between 3DHST (25) and XDF zeropoints
-            tband, zp = band_map[b]
-            conv = 10**((zp - 25)/2.5)
-            row[0][b] = catrow[tband] * conv
-            row[0]["{}_err".format(b)] = catrow[tband.replace("f_", "e_")] * conv
-            row[0]["id"] = catrow["id"]
-        except(KeyError):
-            pass
-
-    return sep, row
 
 
 def plot_images(pos, scene, stamps, source_idx=None, 
@@ -199,40 +166,6 @@ def prettify_axes(axes):
     return artists, labels
 
 
-def get_patch(resultname, splinedata=splinedata, psfpath=psfpath):
-    """
-    This runs in a single CPU process.  It dispatches the 'patch data' to the
-    device and then runs a pymc3 HMC sampler.  Each likelihood call within the
-    HMC sampler copies the proposed parameter position to the device, runs the
-    kernel, and then copies back the result, returning the summed ln-like and
-    the gradients thereof to the sampler.
-
-    :param patchname: 
-        Full path to the patchdata hdf5 file.
-    """
-
-    # Get the results
-    with h5py.File(resultname, "r") as f:
-        chain = f["chain"][:]
-        patch = f.attrs["patchname"]
-        pra, pdec = f.attrs["sky_reference"]
-        ncall = f.attrs["ncall"]
-        twall = f.attrs["wall_time"]
-        lower = f.attrs["lower_bounds"]
-        upper = f.attrs["upper_bounds"]
-        nsources = f.attrs["nactive"]
-
-    patchname = pjoin(path_to_data, "patches", "20190612_9x9_threedhst", 
-                      os.path.basename(patch))
-
-    # --- Prepare Patch Data ---
-    stamps, miniscene = patch_conversion(patchname, splinedata, psfpath, nradii=9)
-    miniscene = set_inactive(miniscene, [stamps[0], stamps[-1]], nmax=nsources)
-    zerocoords(stamps, miniscene, sky_zero=np.array([pra, pdec]))
-    
-    return stamps, miniscene, chain, pra, pdec
-
-
 def show_patch(pid, save=True):
     resultname = "results/max10-patch_udf_withcat_{}_result.h5".format(pid)
     stamps, scene, chain, pra, pdec = get_patch(resultname)
@@ -256,3 +189,31 @@ if __name__ == "__main__":
     #pid = 159
     for pid in pids:
         rname = show_patch(pid)
+    
+    # --- Plot some samples for one chain ---
+    fig, ax = pl.subplots()
+    pid = 382
+    isource = 2
+    resultname = "results/max10-patch_udf_withcat_{}_result.h5".format(pid)
+    stamps, scene, chain, pra, pdec = get_patch(resultname)
+    
+    source = scene.sources[isource]
+    start = int(np.sum([s.nparam for s in scene.sources[:isource]]))
+    stop = start + int(source.nparam)
+    subchain = chain[:, start:stop]
+    bands = source.filternames
+    zps = [band_map[b][1] for b in bands]
+
+    [ax.plot(subchain[:, -1], subchain[:, i] * 3631e6 * 10**(-zps[i] / 2.5) , 
+             'o', label="samples; {}".format(bands[i])) 
+     for i in range(3)]
+    ax.legend()
+    source = scene.sources[2]
+    ax.set_xlabel(r"$R_{half}$ (arcsec)")
+    ax.set_ylabel(r"flux ($\mu Jy$)")
+    ra, dec = source.ra + pra, source.dec + pdec
+    sep, threed = query_3dhst(ra, dec, source.filternames)
+    idx = threed["id"][0]
+
+    ax.set_title("Patch: {}, 3DHST ID: {}, RA:{:3.6f}, Dec: {:3.5f}".format(pid, idx, ra, dec))
+    fig.savefig("samples_examples.png")

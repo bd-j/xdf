@@ -12,11 +12,9 @@ import h5py
 import matplotlib.pyplot as pl
 pl.ion()
 
-from patch_conversion import patch_conversion, zerocoords, set_inactive
-
-from astropy.coordinates import SkyCoord
-from astropy import units as u
 from astropy.io import fits
+from disputils import get_patch, query_3dhst, get_color, get_mag, check_ivar
+
 
 #_print = print
 #print = lambda *args,**kwargs: _print(*args,**kwargs, file=sys.stderr, flush=True)
@@ -49,36 +47,6 @@ path_to_results = "/Users/bjohnson/Projects/xdf/results/"
 splinedata = pjoin(path_to_data, "sersic_mog_model.smooth=0.0150.h5")
 psfpath = pjoin(path_to_data, "psfs", "mixtures")
 
-threedhst_cat = fits.getdata("/Users/bjohnson/Projects/xdf/data/catalogs/goodss_3dhst.v4.1.cat.FITS")
-threed_extras = ["ra", "dec", "tot_cor", "a_image", "b_image", "theta_J2000", "kron_radius"]
-cols = [(b, np.float) for b in bands]
-cols += [(err.format(b), np.float) for b in bands]
-cols += [(n, np.float) for n in threed_extras]
-cols += [("id", np.int)]
-threed_dtype = np.dtype(cols)
-
-
-def query_3dhst(ra, dec, bands):
-    hst = SkyCoord(ra=threedhst_cat['ra'], dec=threedhst_cat['dec'], unit=(u.deg, u.deg))
-    force = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
-    idx, sep, _ = force.match_to_catalog_sky(hst)
-
-    row = np.zeros(1, dtype=threed_dtype)
-    catrow = threedhst_cat[idx]
-    for n in threed_extras:
-        row[0][n] = catrow[n]
-    for b in bands:
-        try:
-            # account for differnce between 3DHST (25) and XDF zeropoints
-            tband, zp = band_map[b]
-            conv = 10**((zp - 25)/2.5)
-            row[0][b] = catrow[tband] * conv
-            row[0]["{}_err".format(b)] = catrow[tband.replace("f_", "e_")] * conv
-            row[0]["id"] = catrow["id"]
-        except(KeyError):
-            pass
-
-    return sep, row
 
 
 def add_source(source, chain, covar=False):
@@ -126,45 +94,12 @@ def add_patch(pid):
     return np.concatenate(rows), np.concatenate(threed)
 
 
-def get_patch(resultname, splinedata=splinedata, psfpath=psfpath):
-    """
-    """
-    # Get the results
-    with h5py.File(resultname, "r") as f:
-        chain = f["chain"][:]
-        patch = f.attrs["patchname"]
-        pra, pdec = f.attrs["sky_reference"]
-        ncall = f.attrs["ncall"]
-        twall = f.attrs["wall_time"]
-        lower = f.attrs["lower_bounds"]
-        upper = f.attrs["upper_bounds"]
-        nsources = f.attrs["nactive"]
 
-    patchname = pjoin(path_to_data, "patches", "20190612_9x9_threedhst", 
-                      os.path.basename(patch))
-
-    # --- Prepare Patch Data ---
-    stamps, miniscene = patch_conversion(patchname, splinedata, psfpath, nradii=9)
-    miniscene = set_inactive(miniscene, [stamps[0], stamps[-1]], nmax=nsources)
-    zerocoords(stamps, miniscene, sky_zero=np.array([pra, pdec]))
+  
     
-    return stamps, miniscene, chain, pra, pdec
-
-
-def get_color(cat, bands, err=err):
-    color = -2.5*np.log10(cat[bands[0]] / force[bands[1]])
-    merr = [1.086 * cat[err.format(b)] / cat[b] for b in bands]
-    cerr = np.hypot(*merr)
-    return color, cerr
-
-def get_mag(cat, band, err=err):
-    mag = band_map[band][1] - 2.5*np.log10(cat[band])
-    mag_e = 1.086*(cat[err.format(band)]/ cat[band])
-    return mag, mag_e
-
 if __name__ == "__main__":
     
-    if False:
+    if True:
         pids = [90, 91, 157, 159, 183, 274, 382, 653]
         pid = 159
         force, threed = [], []
@@ -178,6 +113,7 @@ if __name__ == "__main__":
 
         fits.writeto("ascent_xdf_forcepho.fits", force, overwrite=True)
         fits.writeto("ascent_xdf_threedhst.fits", threed, overwrite=True)
+        #sys.exit()
     else:
         force = fits.getdata("ascent_xdf_forcepho.fits")
         threed = fits.getdata("ascent_xdf_threedhst.fits")
@@ -193,15 +129,21 @@ if __name__ == "__main__":
     ref_band = "f160w"
     mf, mf_e = get_mag(force, ref_band)
     mt, mt_e = get_mag(threed, ref_band)
+    ivar = check_ivar(force["ra"], force["dec"], ref_band)
+    candels_depth = np.log10(ivar) < 5
+    sel = ~candels_depth
 
-    ffig, faxes = pl.subplots(1, 2, figsize=(20, 8))
+    ffig, faxes = pl.subplots(1, 2, figsize=(10, 4))
     fax = faxes[0]
-    fax.errorbar(mt, mf, xerr=mt_e, yerr=mf_e, marker="o", linestyle="", color="slateblue")
-    fax.set_xlabel(r"$m_{{{}}} - 26$ (3DHST)".format(ref_band))
-    fax.set_ylabel(r"$m_{{{}}} - 26$ (force)".format(ref_band))
-    fax.plot(xx, xx, linestyle = "--", color="red")
-    fax.plot(xx, xx-0.2, linestyle=":", color="red", label=r"$\pm 0.2 \, mag$")
-    fax.plot(xx, xx+0.2, linestyle=":", color="red")
+    fax.errorbar(mt[~sel], mf[~sel], xerr=mt_e[~sel], yerr=mf_e[~sel], marker="o", linestyle="", 
+                 linewidth=2, color="slateblue")
+    fax.errorbar(mt[sel], mf[sel], xerr=mt_e[sel], yerr=mf_e[sel], marker="o", linestyle="", 
+                 linewidth=2, color="maroon", label=r"$t_{exp} \gg$ 3DHST")
+    fax.set_xlabel(r"$m_{{{}}}$ (3DHST)".format(ref_band))
+    fax.set_ylabel(r"$m_{{{}}}$ (force)".format(ref_band))
+    fax.plot(xx, xx, linestyle = "--", color="red", linewidth=2)
+    fax.plot(xx, xx-0.2, linestyle=":", color="red", label=r"$\pm 0.2 \, mag$", linewidth=2)
+    fax.plot(xx, xx+0.2, linestyle=":", color="red", linewidth=2)
     fax.legend()
     
     fax = faxes[1]
@@ -210,7 +152,7 @@ if __name__ == "__main__":
     fax.hist(chi[gg], bins=20, alpha=0.5, color="slateblue")
     fax.set_xlabel(r"$\chi = \frac{\Delta m}{\sqrt{\sigma_{force}^2 + \sigma_{3D}^2}}$")   
     fax.text(0.1, 0.7, "std. dev. = {:2.2f}".format(chi.std()), transform=fax.transAxes)
-    ffig.savefig("flux_comparison.pdf")
+    ffig.savefig("flux_comparison.png", dpi=300)
     
     #sys.exit()
     
@@ -229,17 +171,20 @@ if __name__ == "__main__":
     ch, ch_e = get_color(threed, b)
     g = mt < mmax
      
-    cfig, caxes = pl.subplots(1, 1, figsize=(10, 8), squeeze=False)
+    cfig, caxes = pl.subplots(1, 1, figsize=(5, 4), squeeze=False)
     cax = caxes[0, 0]
-    cax.errorbar(ch, cf, xerr=ch_e, yerr=cf_e, marker="o", linestyle="", color="slateblue")
+    cax.errorbar(ch, cf, xerr=ch_e, yerr=cf_e, marker="o", linestyle="", 
+                 linewidth=2, color="slateblue")
     cax.errorbar(ch[g], cf[g], xerr=ch_e[g], yerr=cf_e[g], marker="o", 
-                 linestyle="", color="forestgreen", label=r"$F160W_{{3DHST}} < {:3.1f}$".format(mmax))
+                 linestyle="", linewidth=2, color="forestgreen", 
+                 label=r"$F160W_{{3DHST}} < {:3.1f}$".format(mmax))
     cax.set_xlabel("{}-{} (3DHST)".format(*b))
     cax.set_ylabel("{}-{} (force)".format(*b))
-    cax.plot(xx, xx, linestyle = "--", color="red")
-    cax.plot(xx, xx-0.2, linestyle=":", color="red", label=r"$\pm 0.2 \, mag$")
-    cax.plot(xx, xx+0.2, linestyle=":", color="red")
+    cax.plot(xx, xx, linestyle = "--", color="red", linewidth=2)
+    cax.plot(xx, xx-0.2, linestyle=":", color="red", linewidth=2, 
+             label=r"$\pm 0.2 \, mag$")
+    cax.plot(xx, xx+0.2, linestyle=":", color="red", linewidth=2)
     cax.set_xlim(-2, 3)
     cax.set_ylim(-2, 3)
     cax.legend()
-    cfig.savefig("color_comparison.pdf")
+    cfig.savefig("color_comparison.png", dpi=300)
