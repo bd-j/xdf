@@ -39,7 +39,8 @@ threedcatname = "/Users/bjohnson/Projects/xdf/data/catalogs/goodss_3dhst.v4.1.ca
 if os.path.exists(threedcatname):
     threedhst_cat = fits.getdata(threedcatname)
 
-threed_extras = ["ra", "dec", "tot_cor", "a_image", "b_image", "theta_J2000", "kron_radius"]
+threed_extras = ["ra", "dec", "tot_cor", "a_image", "b_image",
+                 "theta_J2000", "kron_radius"]
 cols = [(b, np.float) for b in bands]
 cols += [(err.format(b), np.float) for b in bands]
 cols += [(n, np.float) for n in threed_extras]
@@ -48,18 +49,19 @@ threed_dtype = np.dtype(cols)
 
 
 def query_3dhst(ra, dec, bands):
-    """Return a row of the `threedhst_cat` array with coordinates closest to 
+    """Return a row of the `threedhst_cat` array with coordinates closest to
     the supplied ra and dec.  Convert fluxes to XDF counts/sec and populate the
     "sep" field of the output.
-    
+
     :returns sep:
         Separation between supplied ra, dec and 3DHST ra, dec, in arcsec.
-    
+
     :returns row:
         A one-element structured array (i.e. a table row) with 3DHST information.
 
     """
-    hst = SkyCoord(ra=threedhst_cat['ra'], dec=threedhst_cat['dec'], unit=(u.deg, u.deg))
+    hst = SkyCoord(ra=threedhst_cat['ra'], dec=threedhst_cat['dec'],
+                   unit=(u.deg, u.deg))
     force = SkyCoord(ra=ra, dec=dec, unit=(u.deg, u.deg))
     idx, sep, _ = force.match_to_catalog_sky(hst)
 
@@ -72,7 +74,7 @@ def query_3dhst(ra, dec, bands):
         try:
             # account for differnce between 3DHST (25) and XDF zeropoints
             tband, zp = band_map[b]
-            conv = 10**((zp - 25)/2.5)
+            conv = 10**((zp - 25) / 2.5)
             row[0][b] = catrow[tband] * conv
             row[0]["{}_err".format(b)] = catrow[tband.replace("f_", "e_")] * conv
             row[0]["id"] = catrow["id"]
@@ -84,22 +86,22 @@ def query_3dhst(ra, dec, bands):
 
 def get_color(cat, bands, err=err):
     """Get a color (in AB mags) and error theron.
-    
+
     :param cat:
         structured ndarray giving the catalog.
-        
+
     :param bands: 2-tuple
         2 strings giving the names of the bands composing the color.  e.g.
         ("f814w", "f160w") will yield the f814w-f160w color and uncertainty in
         AB mags
-        
+
     :returns color:
         The color, same length as `cat`
-        
+
     :returns unc:
         The uncertainty on the color, same length as `cat`
     """
-    color = -2.5*np.log10(cat[bands[0]] / cat[bands[1]])
+    color = -2.5 * np.log10(cat[bands[0]] / cat[bands[1]])
     merr = [1.086 * cat[err.format(b)] / cat[b] for b in bands]
     cerr = np.hypot(*merr)
     return color, cerr
@@ -115,15 +117,15 @@ def get_mag(cat, band, err=err):
         string, e.g. "f160w", specifying the band.
 
     :param err: (optional)
-        format string for the name of the error column. 
+        format string for the name of the error column.
     """
-    mag = band_map[band][1] - 2.5*np.log10(cat[band])
-    mag_e = 1.086*(cat[err.format(band)]/ cat[band])
+    mag = band_map[band][1] - 2.5 * np.log10(cat[band])
+    mag_e = 1.086 * (cat[err.format(band)] / cat[band])
     return mag, mag_e
 
 
 def check_ivar(ra, dec, band):
-    """Return the XDF inverse-variance (proportional to exposure time) in the 
+    """Return the XDF inverse-variance (proportional to exposure time) in the
     requested band at a given location on the sky
     """
     imname = f"../data/images/hlsp_xdf_hst_wfc3ir-60mas_hudf_{band}_v1_wht.fits"
@@ -136,35 +138,40 @@ def check_ivar(ra, dec, band):
 def get_patch(resultname):
     """
     """
-    
     path_to_data = "/Users/bjohnson/Projects/xdf/data/"
     path_to_results = "/Users/bjohnson/Projects/xdf/results/"
     splinedata = pjoin(path_to_data, "sersic_mog_model.smooth=0.0150.h5")
     psfpath = pjoin(path_to_data, "psfs", "mixtures")
 
-    
     # Get the results
-    with h5py.File(resultname, "r") as f:
-        chain = f["chain"][:]
-        patch = f.attrs["patchname"]
-        pra, pdec = f.attrs["sky_reference"]
-        ncall = f.attrs["ncall"]
-        twall = f.attrs["wall_time"]
-        lower = f.attrs["lower_bounds"]
-        upper = f.attrs["upper_bounds"]
-        nsources = f.attrs["nactive"]
+    if os.path.exists(resultname):
+        with h5py.File(resultname, "r") as f:
+            chain = f["chain"][:]
+            patch = f.attrs["patchname"]
+            pra, pdec = tuple(f.attrs["sky_reference"])
+            ncall = f.attrs["ncall"]
+            twall = f.attrs["wall_time"]
+            lower = f.attrs["lower_bounds"]
+            upper = f.attrs["upper_bounds"]
+            nsources = f.attrs["nactive"]
+    else:
+        patch = os.path.basename(resultname).replace("_result", "")
+        chain, lower, upper = None, None, None
+        proposal = None
+        nsources = 0
+        pra = pdec = None
 
-    patchname = pjoin(path_to_data, "patches", "20190612_9x9_threedhst", 
+    patchname = pjoin(path_to_data, "patches", "20190612_9x9_threedhst",
                       os.path.basename(patch))
 
     # --- Prepare Patch Data ---
     from patch_conversion import patch_conversion, zerocoords, set_inactive
     stamps, miniscene = patch_conversion(patchname, splinedata, psfpath, nradii=9)
     miniscene = set_inactive(miniscene, [stamps[0], stamps[-1]], nmax=nsources)
-    zerocoords(stamps, miniscene, sky_zero=np.array([pra, pdec]))
-    
-    return stamps, miniscene, chain, pra, pdec
+    if pra is not None:
+        zerocoords(stamps, miniscene, sky_zero=np.array([pra, pdec]))
 
+    return stamps, miniscene, chain, pra, pdec
 
 
 def add_source(source, chain, covar=False):
@@ -179,13 +186,13 @@ def add_source(source, chain, covar=False):
         else:
             f160w = 1.0
         row[band] = f.mean()
-        row[err.format(band)] = (f/f160w).std()
+        row[err.format(band)] = (f / f160w).std()
     start = source.nband
     for i, p in enumerate(shape_pars):
         ind = start + i
         row[p] = chain[:, ind].mean()
         row[err.format(p)] = chain[:, ind].std()
-    
+
     return row
 
 
