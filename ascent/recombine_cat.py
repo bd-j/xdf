@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 
 """
-A script to get the fluxes (and other properties) of many objects and compare to the 3dhst values
-
+A script to get the fluxes (and other properties) of many objects and compare to
+the 3DHST values
 """
 
 import sys, os
@@ -13,12 +13,10 @@ import matplotlib.pyplot as pl
 pl.ion()
 
 from astropy.io import fits
-from disputils import get_patch, query_3dhst, get_color, get_mag, check_ivar
+from disputils import query_3dhst, get_color, get_mag, check_ivar
 
 
-#_print = print
-#print = lambda *args,**kwargs: _print(*args,**kwargs, file=sys.stderr, flush=True)
-
+# for each band store the 3DHST flux column name, and the XDF zeropoint
 band_map = {"f160w": ("f_F160W", 25.94),
             "f140w": ("f_F140W", 26.45),
             "f125w": ("f_F125W", 26.23),
@@ -42,64 +40,12 @@ cols += [(err.format(p), np.float) for p in shape_pars]
 cols += [("patchID", np.int), ("sourceID", np.int)]
 catalog_dtype = np.dtype(cols)
 
-path_to_data = "/Users/bjohnson/Projects/xdf/data/"
-path_to_results = "/Users/bjohnson/Projects/xdf/results/"
-splinedata = pjoin(path_to_data, "sersic_mog_model.smooth=0.0150.h5")
-psfpath = pjoin(path_to_data, "psfs", "mixtures")
-
-
-
-def add_source(source, chain, covar=False):
-
-    row = np.zeros(1, dtype=catalog_dtype)
-    for band in source.filternames:
-        ind = source.filter_index(band)
-        f = chain[:, ind]
-        if covar:
-            C = np.cov(chain.T)
-            f160w = chain[:, source.filter_index("f160w")]
-        else:
-            f160w = 1.0
-        row[band] = f.mean()
-        row[err.format(band)] = (f/f160w).std()
-    start = source.nband
-    for i, p in enumerate(shape_pars):
-        ind = start + i
-        row[p] = chain[:, ind].mean()
-        row[err.format(p)] = chain[:, ind].std()
-    
-    return row
-
-
-def add_patch(pid):
-    resultname = "results/max10-patch_udf_withcat_{}_result.h5".format(pid)
-    stamps, scene, chain, pra, pdec = get_patch(resultname)
-
-    rows, threed = [], []
-    for isource in range(len(scene)):
-        source = scene.sources[isource]
-        ra, dec = source.ra + pra, source.dec + pdec
-        sep, tdrow = query_3dhst(ra, dec, source.filternames)
-        start = int(np.sum([s.nparam for s in scene.sources[:isource]]))
-        stop = start + int(source.nparam)
-
-        row = add_source(source, chain[:, start:stop])
-        row["ra"] += pra
-        row["dec"] += pdec
-        row["patchID"] = pid
-        row["sourceID"] = isource
-        rows.append(row)
-        threed.append(tdrow)
-
-    return np.concatenate(rows), np.concatenate(threed)
-
-
-
-  
     
 if __name__ == "__main__":
     
-    if True:
+    if False:
+        # reconstruct the forcepho catalog and matching 3dhst catalog
+        from disputils import add_patch
         pids = [90, 91, 157, 159, 183, 274, 382, 653]
         pid = 159
         force, threed = [], []
@@ -119,6 +65,7 @@ if __name__ == "__main__":
         threed = fits.getdata("ascent_xdf_threedhst.fits")
 
 
+    # patch 274 is *messed* *up*
     good = force["patchID"] != 274
     force = force[good]
     threed = threed[good]
@@ -129,8 +76,11 @@ if __name__ == "__main__":
     ref_band = "f160w"
     mf, mf_e = get_mag(force, ref_band)
     mt, mt_e = get_mag(threed, ref_band)
-    ivar = check_ivar(force["ra"], force["dec"], ref_band)
-    candels_depth = np.log10(ivar) < 5
+    try:
+        ivar = check_ivar(force["ra"], force["dec"], ref_band)
+        candels_depth = np.log10(ivar) < 5
+    except:
+        candels_depth = np.ones_like(mf, dtype=bool)
     sel = ~candels_depth
 
     ffig, faxes = pl.subplots(1, 2, figsize=(10, 4))
