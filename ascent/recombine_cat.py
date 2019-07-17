@@ -10,10 +10,11 @@ from os.path import join as pjoin
 import numpy as np
 import h5py
 import matplotlib.pyplot as pl
-pl.ion()
 
 from astropy.io import fits
 from disputils import query_3dhst, get_color, get_mag, check_ivar
+
+pl.ion()
 
 
 # for each band store the 3DHST flux column name, and the XDF zeropoint
@@ -40,9 +41,9 @@ cols += [(err.format(p), np.float) for p in shape_pars]
 cols += [("patchID", np.int), ("sourceID", np.int)]
 catalog_dtype = np.dtype(cols)
 
-    
+
 if __name__ == "__main__":
-    
+
     if False:
         # reconstruct the forcepho catalog and matching 3dhst catalog
         from disputils import add_patch
@@ -64,14 +65,13 @@ if __name__ == "__main__":
         force = fits.getdata("ascent_xdf_forcepho.fits")
         threed = fits.getdata("ascent_xdf_threedhst.fits")
 
-
     # patch 274 is *messed* *up*
     good = force["patchID"] != 274
     force = force[good]
     threed = threed[good]
-    
+
     xx = np.linspace(-3, 3, 100) + 26.0
-    
+
     # --- Plot magnitudes ---
     ref_band = "f160w"
     mf, mf_e = get_mag(force, ref_band)
@@ -85,55 +85,51 @@ if __name__ == "__main__":
 
     ffig, faxes = pl.subplots(1, 2, figsize=(10, 4))
     fax = faxes[0]
-    fax.errorbar(mt[~sel], mf[~sel], xerr=mt_e[~sel], yerr=mf_e[~sel], marker="o", linestyle="", 
-                 linewidth=2, color="slateblue")
-    fax.errorbar(mt[sel], mf[sel], xerr=mt_e[sel], yerr=mf_e[sel], marker="o", linestyle="", 
+    fax.errorbar(mt[~sel], mf[~sel], xerr=mt_e[~sel], yerr=mf_e[~sel],
+                 marker="o", linestyle="", linewidth=2, color="slateblue")
+    fax.errorbar(mt[sel], mf[sel], xerr=mt_e[sel], yerr=mf_e[sel], marker="o", linestyle="",
                  linewidth=2, color="maroon", label=r"$t_{exp} \gg$ 3DHST")
     fax.set_xlabel(r"$m_{{{}}}$ (3DHST)".format(ref_band))
     fax.set_ylabel(r"$m_{{{}}}$ (force)".format(ref_band))
-    fax.plot(xx, xx, linestyle = "--", color="red", linewidth=2)
-    fax.plot(xx, xx-0.2, linestyle=":", color="red", label=r"$\pm 0.2 \, mag$", linewidth=2)
-    fax.plot(xx, xx+0.2, linestyle=":", color="red", linewidth=2)
+    fax.plot(xx, xx, linestyle="--", color="red", linewidth=2)
+    fax.plot(xx, xx - 0.2, linestyle=":", color="red", label=r"$\pm 0.2 \, mag$", linewidth=2)
+    fax.plot(xx, xx + 0.2, linestyle=":", color="red", linewidth=2)
     fax.legend()
-    
+
     fax = faxes[1]
     chi = (mf - mt) / np.sqrt(mf_e**2 + mt_e**2)
     gg = np.isfinite(chi)
     fax.hist(chi[gg], bins=20, alpha=0.5, color="slateblue")
-    fax.set_xlabel(r"$\chi = \frac{\Delta m}{\sqrt{\sigma_{force}^2 + \sigma_{3D}^2}}$")   
+    fax.set_xlabel(r"$\chi = \frac{\Delta m}{\sqrt{\sigma_{force}^2 + \sigma_{3D}^2}}$")
     fax.text(0.1, 0.7, "std. dev. = {:2.2f}".format(chi.std()), transform=fax.transAxes)
     ffig.savefig("flux_comparison.png", dpi=300)
-    
-    #sys.exit()
-    
+
     zz = zip(force["patchID"], force["sourceID"], mt, chi)
-    
+
     _ = [print(z) for z in zz]
-    
+
     # --- Plot colors ---
-     
     mmax = 26.0
     xx -= 26.0
 
     b = ("f814w", "f160w")
-     
     cf, cf_e = get_color(force, b)
     ch, ch_e = get_color(threed, b)
     g = mt < mmax
-     
+
     cfig, caxes = pl.subplots(1, 1, figsize=(5, 4), squeeze=False)
     cax = caxes[0, 0]
-    cax.errorbar(ch, cf, xerr=ch_e, yerr=cf_e, marker="o", linestyle="", 
+    cax.errorbar(ch, cf, xerr=ch_e, yerr=cf_e, marker="o", linestyle="",
                  linewidth=2, color="slateblue")
-    cax.errorbar(ch[g], cf[g], xerr=ch_e[g], yerr=cf_e[g], marker="o", 
-                 linestyle="", linewidth=2, color="forestgreen", 
+    cax.errorbar(ch[g], cf[g], xerr=ch_e[g], yerr=cf_e[g], marker="o",
+                 linestyle="", linewidth=2, color="forestgreen",
                  label=r"$F160W_{{3DHST}} < {:3.1f}$".format(mmax))
     cax.set_xlabel("{}-{} (3DHST)".format(*b))
     cax.set_ylabel("{}-{} (force)".format(*b))
-    cax.plot(xx, xx, linestyle = "--", color="red", linewidth=2)
-    cax.plot(xx, xx-0.2, linestyle=":", color="red", linewidth=2, 
+    cax.plot(xx, xx, linestyle="--", color="red", linewidth=2)
+    cax.plot(xx, xx - 0.2, linestyle=":", color="red", linewidth=2,
              label=r"$\pm 0.2 \, mag$")
-    cax.plot(xx, xx+0.2, linestyle=":", color="red", linewidth=2)
+    cax.plot(xx, xx + 0.2, linestyle=":", color="red", linewidth=2)
     cax.set_xlim(-2, 3)
     cax.set_ylim(-2, 3)
     cax.legend()
