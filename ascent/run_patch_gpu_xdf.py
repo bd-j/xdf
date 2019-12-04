@@ -28,6 +28,7 @@ from patch_conversion import patch_conversion, zerocoords, set_inactive
 
 import theano
 import pymc3 as pm
+from pymc3.step_methods.hmc.quadpotential import QuadPotentialFull
 import theano.tensor as tt
 theano.gof.compilelock.set_lock_status(False)
 # be quiet
@@ -165,13 +166,65 @@ def prior_bounds(scene, npix=4, flux_factor=4):
     return lower, upper
 
 
+def get_step_for_trace(init_cov=None, trace=None, model=None,
+                       regularize_cov=True,
+                       regular_window=5, regular_variance=1e-3,
+                       **kwargs):
+    """
+    Construct an estimate of the mass matrix based on the sample covariance,
+    which is either provided directly via `init_cov` or generated from a
+    `MultiTrace` object from PyMC3. This is then used to initialize a `NUTS`
+    object to use in `sample`.
+    """
+
+    model = pm.modelcontext(model)
+
+    # If no trace or covariance is provided, just use the identity.
+    if trace is None and init_cov is None:
+        potential = QuadPotentialFull(np.eye(model.ndim))
+
+        return pm.NUTS(potential=potential, **kwargs)
+
+    # If the trace is provided, loop over samples
+    # and convert to the relevant parameter space.
+    if trace is not None:
+        samples = np.empty((len(trace) * trace.nchains, model.ndim))
+        i = 0
+        for chain in trace._straces.values():
+            for p in chain:
+                samples[i] = model.bijection.map(p)
+                i += 1
+
+        # Compute the sample covariance.
+        cov = np.cov(samples, rowvar=False)
+
+        # Stan uses a regularized estimator for the covariance matrix to
+        # be less sensitive to numerical issues for large parameter spaces.
+        if regularize_cov:
+            N = len(samples)
+            cov = cov * N / (N + regular_window)
+            diags = np.diag_indices_from(cov)
+            cov[diags] += ((regular_variance * regular_window)
+                           / (N + regular_window))
+    else:
+        # Otherwise, just copy `init_cov`.
+        cov = np.array(init_cov)
+    
+    # Use the sample covariance as the inverse metric.
+    potential = QuadPotentialFull(cov)
+
+    return pm.NUTS(potential=potential, **kwargs)
+
+
 path_to_data = "/gpfs/wolf/gen126/proj-shared/jades/udf/data/"
 path_to_results = "/gpfs/wolf/gen126/proj-shared/jades/udf/results/"
 splinedata = pjoin(path_to_data, "sersic_mog_model.smooth=0.0150.h5")
 psfpath = path_to_data
 
 def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
-              nwarm=250, niter=100, runtype="sample", ntime=10, verbose=True,
+              init_cov=None, start=None,
+              nstart=25, nwarm=250, ntune=2500, niter=200,
+              runtype="sample", ntime=10, verbose=True,
               rank=0, scatter_fluxes=False, tag=""):
     """
     This runs in a single CPU process.  It dispatches the 'patch data' to the
@@ -232,21 +285,46 @@ def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
         print(lower.dtype, upper.dtype)
         pnames = miniscene.parameter_names
         start = dict(zip(pnames, p0))
+
+        # Define the windows used to tune the mass matrix.
+        nwindow = nstart * 2 ** np.arange(np.floor(np.log2((n_tune - n_burn)
+                                                           / n_start)))
+        nwindow = np.append(nwindow, ntune - nwarm - np.sum(nwindow))
+        nwindow = nwindow.astype(int)
+
         # The pm.sample() method below will draw an initial theta, 
         # then call logl.perform and logl.grad multiple times
         # in a loop with different theta values.
         t = time()
         with pm.Model() as opmodel:
-            # set priors for each element of theta
+
+            # Set priors for each element of theta.
             z0 = [pm.Uniform(p, lower=l, upper=u) 
                   for p, l, u in zip(pnames, lower, upper)]
             theta = tt.as_tensor_variable(z0)
-            # instantiate target density and start sampling.
-            pm.DensityDist('likelihood', lambda v: logl(v), observed={'v': theta})
-            trace = pm.sample(draws=niter, tune=nwarm, progressbar=False,
-                              cores=1, discard_tuned_samples=True)#, start=start)
 
+            # Instantiate target density.
+            pm.DensityDist('likelihood', lambda v: logl(v),
+                           observed={'v': theta})
+
+            # Tune mass matrix.
+            start = None
+            burnin = None
+            for steps in nwindow:
+                step = get_step_for_trace(init_cov=init_cov, trace=burnin)
+                burnin = pm.sample(start=start, tune=steps, draws=2, step=step,
+                                   compute_convergence_checks=False,
+                                   discard_tuned_samples=False)
+                start = [t[-1] for t in burnin._straces.values()]
+            step = get_step_for_trace(init_cov=init_cov, trace=burnin)
+            tm = time() - t
+
+            # Sample with tuned mass matrix.
+            trace = pm.sample(draws=niter, tune=nwarm, step=step, start=start,
+                              progressbar=False, cores=1,
+                              discard_tuned_samples=True)
         ts = time() - t
+
         # yuck.
         chain = np.array([trace.get_values(n) for n in pnames]).T
         
