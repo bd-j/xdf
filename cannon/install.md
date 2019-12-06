@@ -2,7 +2,7 @@
 Useful modules on Odyssey
 =====
 
-These should be added to `.bash_profile`, or a little script can be run at the beginning of each job.
+These should be added to `.bash_profile`, or can be run at the beginning of each job.
 
 ```bash
 module purge
@@ -25,6 +25,14 @@ Create conda environment
 ====
 
 ```bash
+# replace this with your group directory
+GROUP=eisenstein_lab
+# you can change this location if you want, but ideally it would be on fast disks
+MYSCRATCH=/n/scratchlfs/${GROUP}/${USER}
+cd $MYSCRATCH
+git clone git@github.com:bd-j/xdf.git
+# or git clone https://github.com:bd-j/xdf.git
+cd xdf/cannon/
 # ---for installing environment to scratchlfs ---
 #CONDIR=/n/scratchlfs/eisenstein_lab/${USER}/envs
 #mkdir -p $CONDIR
@@ -43,7 +51,9 @@ pip install pycuda
 pip install pymc3
 
 # --- install forcepho (optional, can be run from source direcory) ---
+cd $MYSCRATCH
 git clone git@github.com:bd-j/forcepho.git
+# or git clone https://github.com:bd-j/forcepho.git
 cd forcepho
 python setup.py install
 ```
@@ -51,8 +61,12 @@ python setup.py install
 If you've installed forcepho, then you need to do
 
 ```bash
-pyv=3.6  # python version
+source activate jadespho
+python --version
+# python version, you should change this based on output of previous command
+pyv=3.6  
 CONDIR=${HOME}/.conda/envs
+cd ${MYSCRATCH}/forcepho
 cp forcepho/*.h ${CONDIR}/jadespho/lib/python${pyv}/site-packages/forcepho-0.2-py${pyv}.egg/forcepho/
 cp forcepho/*.cu ${CONDIR}/jadespho/lib/python${pyv}/site-packages/forcepho-0.2-py${pyv}.egg/forcepho/
 cp forcepho/*.cc ${CONDIR}/jadespho/lib/python${pyv}/site-packages/forcepho-0.2-py${pyv}.egg/forcepho/
@@ -60,10 +74,10 @@ cp forcepho/*.cc ${CONDIR}/jadespho/lib/python${pyv}/site-packages/forcepho-0.2-
 
 This is something that eventually we can fix by including the c and cuda code as package data where the path will always be well defined.
 
-To delete an env, e.g.:
+Just FYI (don't run this) To delete an env, use e.g.:
 
 ```bash
-conda remove --prefix ${CONDIR}/jadesfpho --all
+conda remove --prefix ${CONDIR}/jadespho --all
 ```
 
 Compilation directories
@@ -72,56 +86,21 @@ Both pycuda and theano/pymc3 write compiled things to cache directories.
 The defaults are wherever you built the environment, which may be unwritable or slow during jobs.
 
 ```bash
-mkdir /n/scratchlfs/<group>/${USER}/pycudacache
-mkdir /n/scratchlfs/<group>/${USER}/theanocache
+mkdir $MYSCRATCH/theanocache
+#mkdir /n/scratchlfs/<group>/${USER}/pycudacache
 ```
+
+Before running a job using pymc3, you also have to do (on the node where the job is running) something like
+```bash
+MYSCRATCH=/n/scratchlfs/${GROUP}/${USER}
+export THEANO_FLAGS="base_compiledir=${MYSCRATCH}/theanocache/"
+```
+
+you'll see this in the scripts below.
 
 DEPRECATED: Then anytime you build a pycuda SourceModule add
 ```python
 SourceModule("""C code here """, cache_dir="/n/scratchlfs/.../<user>/bdjohnson/pycudacache/")
-```
-
-Before running a job using pymnc3, you also have to do something like
-```bash
-export THEANO_FLAGS="base_compiledir=/n/scratchlfs/.../<user>/theanocache/"
-```
-
-Submit Job (Odyssey)
-=====
-
-Single core job
-
-```bash
-#!/bin/bash
-
-#SBATCH -n 1 # Number of cores requested
-#SBATCH -N 1 # Ensure that all cores are on one machine
-#BATCH --gres=gpu:1
-#SBATCH --mem-per-cpu=1000 # Memory per node in MB (see also --mem-per-cpu)
-#SBATCH -p gpu # Partition to submit to
-#SBATCH -t 06:00:00 # Runtime
-#SBATCH -J force_smoke_test
-#SBATCH -o /n/scratchlfs/eisenstein_lab/bdjohnson/jades_force/logs/smoketest_%A_%a.out # Standard out goes to this file
-#SBATCH -e /n/scratchlfs/eisenstein_lab/bdjohnson/jades_force/logs/smoketest%A_%a.err # Standard err goes to this file
-
-module purge
-module load intel/19.0.5-fasrc01 openmpi/4.0.1-fasrc01 hdf5/1.10.5-fasrc01
-module load Anaconda3/5.0.1-fasrc01
-
-MYSCRATCH=/n/scratchlfs/eisenstein_lab/${USER}
-export THEANO_FLAGS="base_compiledir=$MYSCRATCH/theanocache"
-#CONDIR=${MYSCRATCH}/envs
-#source activate ${CONDIR}/jadesfpho
-source activate jadespho
-
-date
-python run_patch_gpu_test_simple.py
-```
-
-Multi-core job: same as above, but the final line is
-
-```
-srun -n $SLURM_NTASKS --mpi=pmi2 python run_patch_gpu_test_simple.py
 ```
 
 Interactive Job (Odyssey)
@@ -143,7 +122,48 @@ Not sure if it's necessary or how to enable MPS server.  On ascent one does
 
 Note that for the gpu_test queue the time limit is 1 hour
 
+Once you have a job running, you can run the uncommented versions for the job submission script below
 
+Submit Job (Odyssey)
+=====
+
+Single core job example slurm jobscript (change the log file directories)
+
+```bash
+#!/bin/bash
+
+#SBATCH -n 1 # Number of cores requested
+#SBATCH -N 1 # Ensure that all cores are on one machine
+#BATCH --gres=gpu:1
+#SBATCH --mem-per-cpu=1000 # Memory per node in MB (see also --mem-per-cpu)
+#SBATCH -p gpu # Partition to submit to
+#SBATCH -t 06:00:00 # Runtime
+#SBATCH -J force_smoke_test
+#SBATCH -o /n/scratchlfs/eisenstein_lab/bdjohnson/jades_force/logs/smoketest_%A_%a.out # Standard out goes to this file
+#SBATCH -e /n/scratchlfs/eisenstein_lab/bdjohnson/jades_force/logs/smoketest%A_%a.err # Standard err goes to this file
+
+module purge
+module load intel/19.0.5-fasrc01 openmpi/4.0.1-fasrc01 hdf5/1.10.5-fasrc01
+module load cuda/10.1.243-fasrc01
+module load Anaconda3/5.0.1-fasrc01
+
+GROUP=eisenstein_lab
+MYSCRATCH=/n/scratchlfs/${GROUP}/${USER}
+export THEANO_FLAGS="base_compiledir=$MYSCRATCH/theanocache"
+#CONDIR=${MYSCRATCH}/envs
+#source activate ${CONDIR}/jadesfpho
+source activate jadespho
+
+date
+cd ${MYSCRATCH}/xdf/cannon/
+python run_patch_gpu_test_simple.py
+```
+
+Multi-core job: same as above, but the final line is
+
+```
+srun -n $SLURM_NTASKS --mpi=pmi2 python run_patch_gpu_test_simple.py
+```
 
 Profiling 
 ======
@@ -156,7 +176,5 @@ use `::KernelName:<int>` where `<int>` is the index of the kernel invocation tha
 jsrun -n1 -g1 -a1  nvprof --analysis-metrics -o /gpfs/wolf/gen126/scratch/bdjohnson/large_prof_metrics%h.%p.nvvp python run_patch_gpu_test_simple.py 
 
 # FLOP count
-jsrun -n1 -g1 -a1  nvprof --kernels ::EvaluateProposal:1 --metrics flop_count_sp python run_patch_gpu_test_simple.py 
-
-
+jsrun -n1 -g1 -a1  nvprof --kernels ::EvaluateProposal:1 --metrics flop_count_sp python run_patch_gpu_test_simple.py
 ```

@@ -9,6 +9,7 @@ $ jsrun -n1 -a16 -c7 -g1 ./run_patch_gpu_test.py
 
 import sys, os
 from time import time
+from argparse import ArgumentParser
 from os.path import join as pjoin
 import numpy as np
 from scipy.optimize import minimize
@@ -39,12 +40,9 @@ logger.setLevel(logging.ERROR)
 
 
 import pycuda.autoinit
-scratch_dir = pjoin('/gpfs/wolf/gen126/scratch', os.environ['USER'], 'residual_images')
-os.makedirs(scratch_dir, exist_ok=True)
 
 _print = print
 print = lambda *args,**kwargs: _print(*args,**kwargs, file=sys.stderr, flush=True)
-
 
 class GPUPosterior:
 
@@ -216,12 +214,9 @@ def get_step_for_trace(init_cov=None, trace=None, model=None,
     return pm.NUTS(potential=potential, **kwargs)
 
 
-path_to_data = "/gpfs/wolf/gen126/proj-shared/jades/udf/data/"
-path_to_results = "/gpfs/wolf/gen126/proj-shared/jades/udf/results/"
-splinedata = pjoin(path_to_data, "sersic_mog_model.smooth=0.0150.h5")
-psfpath = path_to_data
-
-def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
+def run_patch(patchname, maxactive=3, 
+              splinedata="", psfpath="",
+              resultspath=""
               init_cov=None, start=None,
               nstart=25, nwarm=250, ntune=2500, niter=200,
               runtype="sample", ntime=10, verbose=True,
@@ -243,7 +238,7 @@ def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
     #    tail = "_{}_result"
 
     resultname = tag + "-" + os.path.basename(patchname).replace(".h5", "_result")
-    resultname = pjoin(path_to_results, resultname)
+    resultname = pjoin(resultspath, resultname)
 
     print("Rank {} writing to {}".format(rank, resultname))
 
@@ -287,8 +282,8 @@ def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
         start = dict(zip(pnames, p0))
 
         # Define the windows used to tune the mass matrix.
-        nwindow = nstart * 2 ** np.arange(np.floor(np.log2((n_tune - n_burn)
-                                                           / n_start)))
+        nwindow = nstart * 2 ** np.arange(np.floor(np.log2((ntune - nwarm)
+                                                           / nstart)))
         nwindow = np.append(nwindow, ntune - nwarm - np.sum(nwindow))
         nwindow = nwindow.astype(int)
 
@@ -313,7 +308,7 @@ def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
             for steps in nwindow:
                 step = get_step_for_trace(init_cov=init_cov, trace=burnin)
                 burnin = pm.sample(start=start, tune=steps, draws=2, step=step,
-                                   compute_convergence_checks=False,
+                                   compute_convergence_checks=False, cores=1,
                                    discard_tuned_samples=False)
                 start = [t[-1] for t in burnin._straces.values()]
             step = get_step_for_trace(init_cov=init_cov, trace=burnin)
@@ -327,7 +322,7 @@ def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
 
         # yuck.
         chain = np.array([trace.get_values(n) for n in pnames]).T
-        
+
         result = Result()
         result.ndim = len(p0)
         result.nactive = miniscene.nactive
@@ -372,7 +367,7 @@ def run_patch(patchname, splinedata=splinedata, psfpath=psfpath, maxactive=3,
         ts = time() - t
         chain = [model._lnp, model._lnp_grad]
         print("took {}s for a single call".format(ts / ntime))
-    
+
     return chain, (rank, model.ncall, ts)
 
 
@@ -415,7 +410,6 @@ def distribute_patches(allpatches, mpi_barrier=False, run_kwargs={}):
         out = run_patch(patch, rank=rank, **run_kwargs)
 
 
-
 def halt(message):
     """Exit, closing pool safely.
     """
@@ -428,18 +422,49 @@ def halt(message):
 
 
 if __name__ == "__main__":
-    patches = [100, 183, 274, 382, 653]
-    patches2 = [90, 91, 157, 159, 160, 172, 212]
-    patches3 = [217, 323, 328, 391, 464]
-    allpatches = [pjoin(path_to_data, "patch_with_cat", "patch_udf_withcat_{}.h5".format(pid)) 
-                  for pid in patches3]
-    
+
+    parser = ArgumentParser()
+    parser.add_argument("--xdf_path", type=str, 
+                        default="/n/scratchlfs/eisenstein_lab/bdjohnson/xdf")
+    parser.add_argument("--patch_dir", type=str,
+                        default="")
+    parser.add_argument("--patch_number", type=int, nargs="*",
+                        default=[90, 91])
+    parser.add_argument("--patch_name", type=str,
+                        default="patch_udf_withcat_{}.h5")
+    args = parser.parse_args()
+
+    xdf_path = args.xdf_path
+    patches = args.patch_number
+    patchdir = args.patch_dir
+    if patchdir == "":
+        patchdir = pjoin(xdf_path, "data", "patches_with_cat")
+    patchname = args.patch_name
+
+    path_to_data = pjoin(xdf_path, "data")
+    results_path = pjoin(xdf_path, "cannon", "results")
+    splinedata = pjoin(path_to_data, "sersic_mog_model.smooth=0.0150.h5")
+    psfpath = pjoin(path_to_data, "psfs", "mixtures")
+    #scratch_dir = pjoin(xdf_path, "cannon", "residual_images")
+    #os.makedirs(scratch_dir, exist_ok=True)
+    os.makedirs(results_path, exist_ok=True)
+
+    #patches = [100, 183, 274, 382, 653]
+    #patches2 = [90, 91, 157, 159, 160, 172, 212]
+    #patches3 = [90, 91]
+    allpatches = [pjoin(patchdir, patchname.format(pid))
+                  for pid in patches]
+
     run_kwargs = {"maxactive": 15,
-                  "tag": "max10",
-                  "nwarm": 250,
+                  "tag": "max15",
+                  "nwarm": 100,
                   "niter": 100,
+                  "ntune": 200,
                   "runtype": "sample",
                   "scatter_fluxes": False,
+                  "psfpath": psfpath,
+                  "splinedata": splinedata,
+                  "resultspath": results_path
                   }
 
     t = time()
