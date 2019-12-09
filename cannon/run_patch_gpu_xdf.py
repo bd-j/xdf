@@ -216,7 +216,7 @@ def get_step_for_trace(init_cov=None, trace=None, model=None,
 
 def run_patch(patchname, maxactive=3, 
               splinedata="", psfpath="",
-              resultspath=""
+              resultspath="",
               init_cov=None, start=None,
               nstart=25, nwarm=250, ntune=2500, niter=200,
               runtype="sample", ntime=10, verbose=True,
